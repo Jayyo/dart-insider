@@ -1,16 +1,14 @@
 {
+  "buildCommand": "",
+  "outputDirectory": "public",
   "rewrites": [
     {
       "source": "/api/purchases",
       "destination": "/api"
-    }
-  ],
-  "headers": [
+    },
     {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" }
-      ]
+      "source": "/api",
+      "destination": "/api"
     }
   ]
 }
