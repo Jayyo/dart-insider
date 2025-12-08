@@ -1,16 +1,17 @@
 {
+  "functions": {
+    "api/handler.py": {
+      "runtime": "@vercel/python"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/disclosures",
-      "destination": "/api/index"
+      "destination": "/api/handler"
     },
     {
       "source": "/api/executive",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index"
+      "destination": "/api/handler"
     }
   ]
 }
