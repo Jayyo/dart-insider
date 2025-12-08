@@ -22,7 +22,6 @@ API_KEY = "REDACTED"
 BASE_URL = "https://opendart.fss.or.kr/api"
 
 
-@app.get("/")
 @app.get("/api/index")
 async def api_handler(
     start_date: Optional[str] = Query(None, description="Start date (YYYYMMDD)"),
