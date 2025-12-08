@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/api/disclosures",
-      "destination": "/api/index"
+      "destination": "/api/v1/index"
     },
     {
       "source": "/api/executive",
-      "destination": "/api/index"
+      "destination": "/api/v1/index"
     }
   ]
 }
