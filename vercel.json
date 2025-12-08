@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/purchases",
-      "destination": "/index"
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
