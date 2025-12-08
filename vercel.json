@@ -1,12 +1,12 @@
 {
   "rewrites": [
     {
-      "source": "/api/:path*",
+      "source": "/api/disclosures",
       "destination": "/api/index"
     },
     {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
+      "source": "/api/executive",
+      "destination": "/api/index"
     }
   ]
 }
