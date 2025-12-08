@@ -985,7 +985,7 @@
                 const apiStartDate = formatDateForAPI(startDate);
                 const apiEndDate = formatDateForAPI(endDate);
 
-                const response = await fetch(`/api/purchases?start_date=${apiStartDate}&end_date=${apiEndDate}`);
+                const response = await fetch(`/index?start_date=${apiStartDate}&end_date=${apiEndDate}`);
 
                 if (!response.ok) {
                     const error = await response.json();
