@@ -21,7 +21,7 @@ API_KEY = "REDACTED"
 BASE_URL = "https://opendart.fss.or.kr/api"
 
 
-@app.get("/api/purchases")
+@app.get("/api")
 async def get_purchases(
     start_date: str = Query(..., description="Start date (YYYYMMDD)"),
     end_date: str = Query(..., description="End date (YYYYMMDD)")
