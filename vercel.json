@@ -1,0 +1,27 @@
+{
+  "builds": [
+    {
+      "src": "api/purchases.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/purchases",
+      "dest": "/api/purchases.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/purchases.py": {
+      "maxDuration": 60
+    }
+  }
+}
