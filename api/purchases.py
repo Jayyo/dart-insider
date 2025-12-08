@@ -22,7 +22,7 @@ BASE_URL = "https://opendart.fss.or.kr/api"
 
 
 @app.get("/")
-@app.get("/index")
+@app.get("/api/purchases")
 async def get_purchases(
     start_date: str = Query(..., description="Start date (YYYYMMDD)"),
     end_date: str = Query(..., description="End date (YYYYMMDD)")
