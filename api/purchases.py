@@ -47,13 +47,22 @@ async def get_purchases(
                             "stock_code": d.get("stock_code", "")
                         }
 
-            # Step 3: Get executive stock ownership for each company
+            # Step 3: Get executive stock ownership for each company (parallel)
             all_purchases = []
+            corp_items = list(unique_corps.items())
 
-            for i, (corp_code, corp_info) in enumerate(unique_corps.items()):
-                try:
-                    stock_list = await get_executive_stock(client, corp_code)
+            # Process in batches of 20 concurrent requests
+            batch_size = 20
+            for batch_start in range(0, len(corp_items), batch_size):
+                batch = corp_items[batch_start:batch_start + batch_size]
+                tasks = [get_executive_stock(client, corp_code) for corp_code, _ in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
+                for (corp_code, corp_info), result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        continue
+
+                    stock_list = result
                     for item in stock_list:
                         is_exec = item.get("isu_exctv_rgist_at", "") in ["등록", "등기임원", "비등기임원"]
                         ofcps = item.get("isu_exctv_ofcps", "")
@@ -83,13 +92,6 @@ async def get_purchases(
                                 "shares": irds_cnt,
                                 "rate": item.get("sp_stock_lmp_rate", "")
                             })
-
-                    if (i + 1) % 50 == 0:
-                        await asyncio.sleep(0.3)
-
-                except Exception as e:
-                    print(f"Error fetching {corp_code}: {e}")
-                    continue
 
             # Sort by shares descending
             all_purchases.sort(key=lambda x: x["shares"], reverse=True)
