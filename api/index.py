@@ -1,10 +1,11 @@
 """
 Vercel Serverless Function for DART API
-Single file with multiple routes to work within Vercel's constraints
+Single endpoint with parameter-based routing
 """
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 import httpx
 
 app = FastAPI()
@@ -21,11 +22,30 @@ API_KEY = "9361d74facc8c239f634b08c0f436192de5c14de"
 BASE_URL = "https://opendart.fss.or.kr/api"
 
 
-@app.get("/api/disclosures")
-async def get_disclosures(
-    start_date: str = Query(..., description="Start date (YYYYMMDD)"),
-    end_date: str = Query(..., description="End date (YYYYMMDD)")
+@app.get("/")
+@app.get("/api/index")
+async def api_handler(
+    start_date: Optional[str] = Query(None, description="Start date (YYYYMMDD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYYMMDD)"),
+    corp_code: Optional[str] = Query(None, description="Company code"),
+    corp_name: Optional[str] = Query("", description="Company name"),
+    corp_cls: Optional[str] = Query("", description="Market type"),
+    stock_code: Optional[str] = Query("", description="Stock code")
 ):
+    """Single endpoint - routes based on parameters"""
+
+    # If start_date is provided, get disclosures
+    if start_date and end_date:
+        return await get_disclosures(start_date, end_date)
+
+    # If corp_code is provided, get executive info
+    if corp_code:
+        return await get_executive(corp_code, corp_name, corp_cls, stock_code)
+
+    return {"success": False, "message": "Missing required parameters"}
+
+
+async def get_disclosures(start_date: str, end_date: str):
     """Get disclosure list and return unique companies with executive reports"""
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
@@ -84,13 +104,7 @@ async def get_disclosures(
         return {"success": False, "companies": [], "message": str(e)}
 
 
-@app.get("/api/executive")
-async def get_executive(
-    corp_code: str = Query(..., description="Company code"),
-    corp_name: str = Query("", description="Company name"),
-    corp_cls: str = Query("", description="Market type (Y/K/N/E)"),
-    stock_code: str = Query("", description="Stock code")
-):
+async def get_executive(corp_code: str, corp_name: str, corp_cls: str, stock_code: str):
     """Get executive stock ownership for a single company"""
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:

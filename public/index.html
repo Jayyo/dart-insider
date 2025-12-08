@@ -986,7 +986,7 @@
                 const apiEndDate = formatDateForAPI(endDate);
 
                 // Step 1: Get disclosure list and unique companies
-                const disclosureRes = await fetch(`/api/disclosures?start_date=${apiStartDate}&end_date=${apiEndDate}`);
+                const disclosureRes = await fetch(`/api/index?start_date=${apiStartDate}&end_date=${apiEndDate}`);
                 if (!disclosureRes.ok) {
                     throw new Error('공시 목록 조회 실패');
                 }
@@ -1017,7 +1017,7 @@
                         corp_cls: company.corp_cls || '',
                         stock_code: company.stock_code || ''
                     });
-                    const res = await fetch(`/api/executive?${params}`);
+                    const res = await fetch(`/api/index?${params}`);
                     const data = await res.json();
                     completed++;
                     updateLoadingText(`${totalCompanies}개 기업 데이터 수집 중... (${completed}/${totalCompanies})`);

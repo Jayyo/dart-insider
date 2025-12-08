@@ -1,12 +1,1 @@
-{
-  "rewrites": [
-    {
-      "source": "/api/disclosures",
-      "destination": "/api/v1/index"
-    },
-    {
-      "source": "/api/executive",
-      "destination": "/api/v1/index"
-    }
-  ]
-}
+{}
