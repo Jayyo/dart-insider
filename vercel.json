@@ -1,13 +1,7 @@
 {
-  "buildCommand": "",
-  "outputDirectory": "public",
   "rewrites": [
     {
       "source": "/api/purchases",
-      "destination": "/api"
-    },
-    {
-      "source": "/api",
       "destination": "/api"
     }
   ]
