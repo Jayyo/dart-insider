@@ -21,7 +21,6 @@ API_KEY = "REDACTED"
 BASE_URL = "https://opendart.fss.or.kr/api"
 
 
-@app.get("/")
 @app.get("/api/disclosures")
 async def get_disclosures(
     start_date: str = Query(..., description="Start date (YYYYMMDD)"),
