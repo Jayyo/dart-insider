@@ -967,7 +967,7 @@
             donutChart.update();
         }
 
-        // Data Fetching - Uses backend API to avoid CORS issues
+        // Data Fetching - Split API calls to avoid Vercel timeout
         async function fetchData() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
@@ -978,49 +978,98 @@
             }
 
             showLoading();
-            updateLoadingText('서버에서 데이터 수집 중... (1-2분 소요)');
+            updateLoadingText('공시 목록 조회 중...');
             allData = [];
 
             try {
                 const apiStartDate = formatDateForAPI(startDate);
                 const apiEndDate = formatDateForAPI(endDate);
 
-                const response = await fetch(`/api/purchases?start_date=${apiStartDate}&end_date=${apiEndDate}`);
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.detail || 'API 오류');
+                // Step 1: Get disclosure list and unique companies
+                const disclosureRes = await fetch(`/api/disclosures?start_date=${apiStartDate}&end_date=${apiEndDate}`);
+                if (!disclosureRes.ok) {
+                    throw new Error('공시 목록 조회 실패');
+                }
+                const disclosureData = await disclosureRes.json();
+                if (!disclosureData.success) {
+                    throw new Error(disclosureData.message || '공시 목록 조회 실패');
                 }
 
-                const result = await response.json();
+                const companies = disclosureData.companies;
+                const totalCompanies = companies.length;
 
-                if (!result.success) {
-                    throw new Error(result.message || '데이터 조회 실패');
+                if (totalCompanies === 0) {
+                    hideLoading();
+                    alert('해당 기간에 임원 자사주 매입 공시가 없습니다.');
+                    return;
                 }
 
-                // Map response data to local format
-                allData = result.data.map(d => ({
-                    corp_name: d.corp_name,
-                    stock_code: d.stock_code,
-                    market: d.market,
-                    exec_name: d.exec_name,
-                    position: d.position,
-                    shares: d.shares,
-                    rate: d.rate
-                }));
+                updateLoadingText(`${totalCompanies}개 기업 데이터 수집 중... (0/${totalCompanies})`);
 
+                // Step 2: Fetch executive data for each company (8 concurrent requests)
+                const CONCURRENT_LIMIT = 8;
+                let completed = 0;
+
+                const fetchExecutive = async (company) => {
+                    const params = new URLSearchParams({
+                        corp_code: company.corp_code,
+                        corp_name: company.corp_name || '',
+                        corp_cls: company.corp_cls || '',
+                        stock_code: company.stock_code || ''
+                    });
+                    const res = await fetch(`/api/executive?${params}`);
+                    const data = await res.json();
+                    completed++;
+                    updateLoadingText(`${totalCompanies}개 기업 데이터 수집 중... (${completed}/${totalCompanies})`);
+                    return data;
+                };
+
+                // Process in batches
+                const results = [];
+                for (let i = 0; i < companies.length; i += CONCURRENT_LIMIT) {
+                    const batch = companies.slice(i, i + CONCURRENT_LIMIT);
+                    const batchResults = await Promise.all(batch.map(fetchExecutive));
+                    results.push(...batchResults);
+                }
+
+                // Collect all purchases
+                for (const result of results) {
+                    if (result.success && result.purchases) {
+                        allData.push(...result.purchases);
+                    }
+                }
+
+                // Sort by shares descending
+                allData.sort((a, b) => b.shares - a.shares);
                 filteredData = [...allData];
 
-                // Update stats from server response
-                const stats = result.stats;
-                document.getElementById('statCompanies').textContent = stats.companies.toLocaleString();
-                document.getElementById('statExecutives').textContent = stats.executives.toLocaleString();
-                document.getElementById('statShares').textContent = formatNumber(stats.total_shares);
+                // Calculate stats
+                const uniqueCompanies = new Set(allData.map(d => d.corp_name));
+                const totalShares = allData.reduce((sum, d) => sum + d.shares, 0);
 
-                if (stats.top_company) {
-                    document.getElementById('statTopCompany').textContent = stats.top_company;
+                // Find top company
+                const companyShares = {};
+                for (const d of allData) {
+                    companyShares[d.corp_name] = (companyShares[d.corp_name] || 0) + d.shares;
+                }
+                let topCompany = '';
+                let topCompanyShares = 0;
+                for (const [name, shares] of Object.entries(companyShares)) {
+                    if (shares > topCompanyShares) {
+                        topCompany = name;
+                        topCompanyShares = shares;
+                    }
+                }
+
+                // Update stats
+                document.getElementById('statCompanies').textContent = uniqueCompanies.size.toLocaleString();
+                document.getElementById('statExecutives').textContent = allData.length.toLocaleString();
+                document.getElementById('statShares').textContent = formatNumber(totalShares);
+
+                if (topCompany) {
+                    document.getElementById('statTopCompany').textContent = topCompany;
                     document.getElementById('statTopCompanySub').textContent =
-                        `${formatNumber(stats.top_company_shares)}주 매입`;
+                        `${formatNumber(topCompanyShares)}주 매입`;
                 }
 
                 updateCharts();
