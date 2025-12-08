@@ -2,12 +2,7 @@
   "rewrites": [
     {
       "source": "/api/purchases",
-      "destination": "/api/purchases.py"
+      "destination": "/api"
     }
-  ],
-  "functions": {
-    "api/purchases.py": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }
