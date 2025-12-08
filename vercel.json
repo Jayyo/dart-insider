@@ -1,14 +1,12 @@
 {
-  "buildCommand": "",
-  "outputDirectory": "public",
   "rewrites": [
     {
       "source": "/api/disclosures",
-      "destination": "/api/index"
+      "destination": "/api/dart"
     },
     {
       "source": "/api/executive",
-      "destination": "/api/index"
+      "destination": "/api/dart"
     }
   ]
 }
