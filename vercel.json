@@ -1,12 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/disclosures",
-      "destination": "/api/disclosures"
-    },
-    {
-      "source": "/api/executive",
-      "destination": "/api/executive"
+      "source": "/api/:path*",
+      "destination": "/api/index"
     },
     {
       "source": "/((?!api/).*)",
