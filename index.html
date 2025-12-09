@@ -490,6 +490,25 @@
             font-family: 'IBM Plex Mono', monospace;
         }
 
+        .reason-loading {
+            cursor: pointer;
+            color: var(--accent);
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: rgba(96, 165, 250, 0.1);
+            transition: background 0.2s;
+        }
+
+        .reason-loading:hover {
+            background: rgba(96, 165, 250, 0.2);
+        }
+
+        .reason-cell {
+            max-width: 100px;
+            font-size: 12px;
+        }
+
         /* Pagination */
         .pagination {
             display: flex;
@@ -791,12 +810,15 @@
                             <th onclick="sortTable(4)">임원명</th>
                             <th onclick="sortTable(5)">직위</th>
                             <th onclick="sortTable(6)" class="text-right">매수주식수</th>
-                            <th onclick="sortTable(7)" class="text-right">변동후지분율</th>
+                            <th onclick="sortTable(7)" class="text-right">발행주식총수</th>
+                            <th onclick="sortTable(8)" class="text-right">변동후지분율</th>
+                            <th onclick="sortTable(9)">변동사유</th>
+                            <th onclick="sortTable(10)">보고일</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody">
                         <tr>
-                            <td colspan="8">
+                            <td colspan="11">
                                 <div class="empty-state">
                                     <div class="empty-icon">📊</div>
                                     <div class="empty-title">데이터가 없습니다</div>
@@ -967,7 +989,7 @@
             donutChart.update();
         }
 
-        // Data Fetching - Split API calls to avoid Vercel timeout
+        // Data Fetching - Single API call for local server
         async function fetchData() {
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
@@ -978,74 +1000,50 @@
             }
 
             showLoading();
-            updateLoadingText('공시 목록 조회 중...');
+            updateLoadingText('데이터 조회 중... (시간이 다소 걸릴 수 있습니다)');
             allData = [];
 
             try {
                 const apiStartDate = formatDateForAPI(startDate);
                 const apiEndDate = formatDateForAPI(endDate);
 
-                // Step 1: Get disclosure list and unique companies
-                const disclosureRes = await fetch(`/api/index?start_date=${apiStartDate}&end_date=${apiEndDate}`);
-                if (!disclosureRes.ok) {
-                    throw new Error('공시 목록 조회 실패');
+                // Single API call to get all data
+                const response = await fetch(`/api/purchases?start_date=${apiStartDate}&end_date=${apiEndDate}`);
+                if (!response.ok) {
+                    throw new Error('데이터 조회 실패');
                 }
-                const disclosureData = await disclosureRes.json();
-                if (!disclosureData.success) {
-                    throw new Error(disclosureData.message || '공시 목록 조회 실패');
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.message || '데이터 조회 실패');
                 }
 
-                const companies = disclosureData.companies;
-                const totalCompanies = companies.length;
-
-                if (totalCompanies === 0) {
+                if (result.data.length === 0) {
                     hideLoading();
                     alert('해당 기간에 임원 자사주 매입 공시가 없습니다.');
                     return;
                 }
 
-                updateLoadingText(`${totalCompanies}개 기업 데이터 수집 중... (0/${totalCompanies})`);
+                // Map server response to frontend format
+                allData = result.data.map(item => ({
+                    rcept_no: item.rcept_no,
+                    corp_name: item.corp_name,
+                    stock_code: item.stock_code,
+                    market: item.market,
+                    exec_name: item.exec_name,
+                    position: item.position,
+                    shares: item.shares,
+                    total_shares: item.total_shares || 0,
+                    rate: item.rate,
+                    reason: '',  // Will be loaded on demand
+                    report_date: item.report_date
+                }));
 
-                // Step 2: Fetch executive data for each company (8 concurrent requests)
-                const CONCURRENT_LIMIT = 8;
-                let completed = 0;
-
-                const fetchExecutive = async (company) => {
-                    const params = new URLSearchParams({
-                        corp_code: company.corp_code,
-                        corp_name: company.corp_name || '',
-                        corp_cls: company.corp_cls || '',
-                        stock_code: company.stock_code || ''
-                    });
-                    const res = await fetch(`/api/index?${params}`);
-                    const data = await res.json();
-                    completed++;
-                    updateLoadingText(`${totalCompanies}개 기업 데이터 수집 중... (${completed}/${totalCompanies})`);
-                    return data;
-                };
-
-                // Process in batches
-                const results = [];
-                for (let i = 0; i < companies.length; i += CONCURRENT_LIMIT) {
-                    const batch = companies.slice(i, i + CONCURRENT_LIMIT);
-                    const batchResults = await Promise.all(batch.map(fetchExecutive));
-                    results.push(...batchResults);
-                }
-
-                // Collect all purchases
-                for (const result of results) {
-                    if (result.success && result.purchases) {
-                        allData.push(...result.purchases);
-                    }
-                }
-
-                // Sort by shares descending
-                allData.sort((a, b) => b.shares - a.shares);
                 filteredData = [...allData];
 
-                // Calculate stats
-                const uniqueCompanies = new Set(allData.map(d => d.corp_name));
-                const totalShares = allData.reduce((sum, d) => sum + d.shares, 0);
+                // Use stats from server response
+                const stats = result.stats;
+                const uniqueCompanies = { size: stats.companies };
+                const totalShares = stats.total_shares;
 
                 // Find top company
                 const companyShares = {};
@@ -1187,7 +1185,10 @@
                     <td>${d.exec_name}</td>
                     <td>${d.position}</td>
                     <td class="text-right number"><strong>${d.shares.toLocaleString()}</strong></td>
+                    <td class="text-right number">${d.total_shares ? d.total_shares.toLocaleString() : '-'}</td>
                     <td class="text-right number">${d.rate}%</td>
+                    <td class="reason-cell" data-rcept="${d.rcept_no}">${d.reason || '<span class="reason-loading" onclick="loadReason(this, \''+d.rcept_no+'\')">조회</span>'}</td>
+                    <td class="number">${d.report_date || '-'}</td>
                 </tr>
             `).join('');
 
@@ -1262,7 +1263,7 @@
                 sortAsc = true;
             }
 
-            const keys = ['', 'corp_name', 'stock_code', 'market', 'exec_name', 'position', 'shares', 'rate'];
+            const keys = ['', 'corp_name', 'stock_code', 'market', 'exec_name', 'position', 'shares', 'total_shares', 'rate', 'reason', 'report_date'];
             const key = keys[col];
 
             if (key) {
@@ -1283,11 +1284,53 @@
             updateTable();
         }
 
+        // Load report reason on demand
+        async function loadReason(element, rceptNo) {
+            if (!rceptNo) {
+                element.textContent = '-';
+                return;
+            }
+            element.textContent = '로딩...';
+            try {
+                const response = await fetch(`/api/report-reason?rcept_no=${rceptNo}`);
+                const result = await response.json();
+                const reason = result.reason || '-';
+
+                // Update element
+                element.outerHTML = reason;
+
+                // Update data in allData and filteredData
+                for (const item of allData) {
+                    if (item.rcept_no === rceptNo) {
+                        item.reason = reason;
+                    }
+                }
+                for (const item of filteredData) {
+                    if (item.rcept_no === rceptNo) {
+                        item.reason = reason;
+                    }
+                }
+            } catch (err) {
+                element.textContent = '오류';
+            }
+        }
+
+        // Load all reasons for current page
+        async function loadAllReasons() {
+            const cells = document.querySelectorAll('.reason-loading');
+            for (const cell of cells) {
+                const rceptNo = cell.closest('td').dataset.rcept;
+                if (rceptNo) {
+                    await loadReason(cell, rceptNo);
+                }
+            }
+        }
+
         // CSV Download
         function downloadCSV() {
             if (filteredData.length === 0) return;
 
-            const headers = ['No', '기업명', '종목코드', '시장구분', '임원명', '직위', '매수주식수', '변동후지분율'];
+            const headers = ['No', '기업명', '종목코드', '시장구분', '임원명', '직위', '매수주식수', '발행주식총수', '변동후지분율', '변동사유', '보고일'];
             const rows = filteredData.map((d, i) => [
                 i + 1,
                 d.corp_name,
@@ -1296,7 +1339,10 @@
                 d.exec_name,
                 d.position,
                 d.shares,
-                d.rate
+                d.total_shares || '',
+                d.rate,
+                d.reason || '',
+                d.report_date || ''
             ]);
 
             const csvContent = [headers, ...rows]
