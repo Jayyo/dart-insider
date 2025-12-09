@@ -424,6 +424,21 @@
             border-color: var(--primary);
         }
 
+        .page-size-select {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .page-size-select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
         .table-wrapper {
             overflow-x: auto;
         }
@@ -491,22 +506,40 @@
         }
 
         .reason-loading {
-            cursor: pointer;
-            color: var(--accent);
+            color: var(--text-secondary);
             font-size: 12px;
-            padding: 2px 8px;
-            border-radius: 4px;
-            background: rgba(96, 165, 250, 0.1);
-            transition: background 0.2s;
-        }
-
-        .reason-loading:hover {
-            background: rgba(96, 165, 250, 0.2);
+            font-style: italic;
         }
 
         .reason-cell {
-            max-width: 100px;
+            max-width: 150px;
             font-size: 12px;
+        }
+
+        .reason-content {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dart-link-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            background: rgba(96, 165, 250, 0.15);
+            color: var(--accent);
+            font-size: 10px;
+            text-decoration: none;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .dart-link-btn:hover {
+            background: rgba(96, 165, 250, 0.3);
+            transform: scale(1.1);
         }
 
         /* Pagination */
@@ -796,6 +829,12 @@
             <div class="table-header">
                 <div class="table-title">📋 상세 데이터</div>
                 <div class="table-actions">
+                    <select id="pageSizeSelect" class="page-size-select" onchange="changePageSize()">
+                        <option value="20">20건</option>
+                        <option value="50">50건</option>
+                        <option value="100">100건</option>
+                        <option value="all">전체</option>
+                    </select>
                     <input type="text" class="search-input" placeholder="기업명, 임원명 검색..." id="searchInput" oninput="filterTable()">
                 </div>
             </div>
@@ -852,8 +891,9 @@
         let allData = [];
         let filteredData = [];
         let currentPage = 1;
-        const pageSize = 20;
+        let pageSize = 20;
         let barChart, donutChart;
+        let reasonLoadingInProgress = false;
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -1079,6 +1119,9 @@
                     `마지막 업데이트: ${new Date().toLocaleString('ko-KR')}`;
                 document.getElementById('dataCount').textContent = `총 ${allData.length}건`;
 
+                // Start background loading of reasons
+                loadAllReasonsBackground();
+
             } catch (error) {
                 hideLoading();
                 alert(`데이터 조회 실패: ${error.message}`);
@@ -1187,7 +1230,12 @@
                     <td class="text-right number"><strong>${d.shares.toLocaleString()}</strong></td>
                     <td class="text-right number">${d.total_shares ? d.total_shares.toLocaleString() : '-'}</td>
                     <td class="text-right number">${d.rate}%</td>
-                    <td class="reason-cell" data-rcept="${d.rcept_no}">${d.reason || '<span class="reason-loading" onclick="loadReason(this, \''+d.rcept_no+'\')">조회</span>'}</td>
+                    <td class="reason-cell" data-rcept="${d.rcept_no}">
+                        <div class="reason-content">
+                            <span class="reason-text">${d.reason || '<span class="reason-loading">로딩중...</span>'}</span>
+                            <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}" target="_blank" class="dart-link-btn" title="DART 공시 보기">↗</a>
+                        </div>
+                    </td>
                     <td class="number">${d.report_date || '-'}</td>
                 </tr>
             `).join('');
@@ -1315,15 +1363,51 @@
             }
         }
 
-        // Load all reasons for current page
-        async function loadAllReasons() {
-            const cells = document.querySelectorAll('.reason-loading');
-            for (const cell of cells) {
-                const rceptNo = cell.closest('td').dataset.rcept;
-                if (rceptNo) {
-                    await loadReason(cell, rceptNo);
+        // Change page size
+        function changePageSize() {
+            const select = document.getElementById('pageSizeSelect');
+            const value = select.value;
+            if (value === 'all') {
+                pageSize = filteredData.length || 9999;
+            } else {
+                pageSize = parseInt(value);
+            }
+            currentPage = 1;
+            updateTable();
+        }
+
+        // Background loading of all reasons
+        async function loadAllReasonsBackground() {
+            if (reasonLoadingInProgress) return;
+            reasonLoadingInProgress = true;
+
+            // Load reasons for items that don't have one yet
+            for (const item of allData) {
+                if (!item.reason && item.rcept_no) {
+                    try {
+                        const response = await fetch(`/api/report-reason?rcept_no=${item.rcept_no}`);
+                        const result = await response.json();
+                        item.reason = result.reason || '-';
+
+                        // Also update in filteredData
+                        const filtered = filteredData.find(d => d.rcept_no === item.rcept_no);
+                        if (filtered) filtered.reason = item.reason;
+
+                        // Update the cell if visible
+                        const cell = document.querySelector(`td[data-rcept="${item.rcept_no}"] .reason-text`);
+                        if (cell && cell.querySelector('.reason-loading')) {
+                            cell.innerHTML = item.reason;
+                        }
+                    } catch (err) {
+                        console.error('Failed to load reason:', err);
+                    }
+
+                    // Small delay to avoid overwhelming the server
+                    await new Promise(r => setTimeout(r, 100));
                 }
             }
+
+            reasonLoadingInProgress = false;
         }
 
         // CSV Download

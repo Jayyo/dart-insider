@@ -396,6 +396,25 @@ async def get_total_shares(client: httpx.AsyncClient, corp_code: str) -> int:
 # Cache for report reasons (rcept_no -> reason text)
 report_reason_cache = {}
 
+# RPT_RSN code mapping table
+RPT_RSN_MAP = {
+    "01": "장내매수(+)",
+    "02": "장외매수(+)",
+    "11": "장내매도(-)",
+    "12": "장외매도(-)",
+    "21": "유상신주취득(+)",
+    "22": "신주인수권행사(+)",
+    "23": "무상신주취득(+)",
+    "24": "제3자배정유상증자(+)",
+    "25": "스톡옵션행사(+)",
+    "26": "전환권행사(+)",
+    "27": "교환권행사(+)",
+    "29": "신규상장(+)",
+    "31": "신규선임(+)",
+    "98": "기타(-)",
+    "99": "기타(+)",
+}
+
 async def get_report_reason(client: httpx.AsyncClient, rcept_no: str) -> str:
     """Get report reason from disclosure document"""
     # Check cache first
@@ -419,12 +438,27 @@ async def get_report_reason(client: httpx.AsyncClient, rcept_no: str) -> str:
             for filename in zf.namelist():
                 if filename.endswith('.xml'):
                     xml_content = zf.read(filename).decode('utf-8')
-                    # Extract change reason using regex (CHN_RSN = 변동사유)
-                    match = re.search(r'ACODE="CHN_RSN"[^>]*>([^<]+)', xml_content)
-                    if match:
-                        reason = match.group(1).strip()
-                        report_reason_cache[rcept_no] = reason
-                        return reason
+                    reasons = []
+
+                    # Method 1: Extract RPT_RSN from AUNIT attribute (officer reports)
+                    # Pattern handles various attribute orders in XML
+                    rpt_rsn_matches = re.findall(r'AUNIT="RPT_RSN"[^>]*AUNITVALUE="(\d+)"[^>]*>([^<]*)', xml_content)
+                    for code, text in rpt_rsn_matches:
+                        reason_text = text.strip() if text.strip() else RPT_RSN_MAP.get(code, f"코드{code}")
+                        if reason_text and reason_text not in reasons:
+                            reasons.append(reason_text)
+
+                    # Method 2: Fallback to CHN_RSN (5% holder reports)
+                    if not reasons:
+                        chn_match = re.search(r'ACODE="CHN_RSN"[^>]*>([^<]+)', xml_content)
+                        if chn_match:
+                            reasons.append(chn_match.group(1).strip())
+
+                    if reasons:
+                        # Return unique reasons, comma-separated if multiple
+                        result = ", ".join(dict.fromkeys(reasons))
+                        report_reason_cache[rcept_no] = result
+                        return result
 
         report_reason_cache[rcept_no] = ""
         return ""
