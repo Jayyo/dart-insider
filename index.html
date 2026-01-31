@@ -861,7 +861,7 @@
                                 <div class="empty-state">
                                     <div class="empty-icon">📊</div>
                                     <div class="empty-title">데이터가 없습니다</div>
-                                    <div>날짜를 선택하고 "데이터 불러오기" 버튼을 클릭하세요</div>
+                                    <div>데이터를 불러오는 중입니다...</div>
                                 </div>
                             </td>
                         </tr>
@@ -899,6 +899,8 @@
         document.addEventListener('DOMContentLoaded', () => {
             initializeDates();
             initializeCharts();
+            // Auto-load data from DB on page load
+            fetchData();
         });
 
         function initializeDates() {
@@ -1115,8 +1117,12 @@
                 hideLoading();
 
                 document.getElementById('csvBtn').disabled = allData.length === 0;
+                const updateTime = result.last_updated
+                    ? new Date(result.last_updated).toLocaleString('ko-KR')
+                    : new Date().toLocaleString('ko-KR');
+                const sourceLabel = result.source === 'database' ? 'DB' : 'DART API';
                 document.getElementById('lastUpdate').textContent =
-                    `마지막 업데이트: ${new Date().toLocaleString('ko-KR')}`;
+                    `마지막 업데이트: ${updateTime} (${sourceLabel})`;
                 document.getElementById('dataCount').textContent = `총 ${allData.length}건`;
 
                 // Start background loading of reasons
