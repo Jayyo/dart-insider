@@ -12,26 +12,26 @@
         :root {
             --primary: #10B981;
             --primary-hover: #059669;
-            --accent: #60A5FA;
-            --bg: #0B1324;
-            --surface: #111827;
-            --surface-hover: #162033;
-            --text: #F9FAFB;
-            --text-secondary: #9CA3AF;
-            --danger: #F87171;
-            --success: #34D399;
-            --border: #1F2937;
+            --accent: #3B82F6;
+            --bg: #09090B;
+            --surface: #18181B;
+            --surface-hover: #27272A;
+            --text: #FAFAFA;
+            --text-secondary: #A1A1AA;
+            --danger: #EF4444;
+            --success: #10B981;
+            --border: #27272A;
             --gradient-start: #10B981;
-            --gradient-end: #60A5FA;
+            --gradient-end: #3B82F6;
         }
 
         [data-theme="light"] {
-            --bg: #F3F4F6;
+            --bg: #F4F4F5;
             --surface: #FFFFFF;
-            --surface-hover: #F9FAFB;
-            --text: #111827;
-            --text-secondary: #6B7280;
-            --border: #E5E7EB;
+            --surface-hover: #F4F4F5;
+            --text: #18181B;
+            --text-secondary: #71717A;
+            --border: #E4E4E7;
         }
 
         * {
@@ -317,14 +317,15 @@
         }
 
         .stat-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
-            background: rgba(16, 185, 129, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.12);
+            color: var(--primary);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
         }
 
         .stat-title {
@@ -446,12 +447,26 @@
         table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
         }
+
+        /* Column widths */
+        th:nth-child(1) { width: 48px; }
+        th:nth-child(2) { width: 120px; }
+        th:nth-child(3) { width: 78px; }
+        th:nth-child(4) { width: 68px; }
+        th:nth-child(5) { width: 80px; }
+        th:nth-child(6) { width: 90px; }
+        th:nth-child(7) { width: 105px; }
+        th:nth-child(8) { width: 110px; }
+        th:nth-child(9) { width: 70px; }
+        th:nth-child(10) { width: auto; }
+        th:nth-child(11) { width: 90px; }
 
         th {
             text-align: left;
-            padding: 14px 20px;
-            font-size: 12px;
+            padding: 12px 14px;
+            font-size: 11px;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
@@ -468,15 +483,16 @@
             color: var(--primary);
         }
 
-        th.text-right, td.text-right {
-            text-align: right;
-        }
+        th.text-right, td.text-right { text-align: right; }
+        th.text-center, td.text-center { text-align: center; }
 
         td {
-            padding: 16px 20px;
-            font-size: 14px;
+            padding: 12px 14px;
+            font-size: 13px;
             border-bottom: 1px solid var(--border);
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         tr:hover td {
@@ -497,8 +513,13 @@
         }
 
         .market-kosdaq {
-            background: rgba(96, 165, 250, 0.1);
+            background: rgba(59, 130, 246, 0.1);
             color: var(--accent);
+        }
+
+        .market-etc {
+            background: rgba(161, 161, 170, 0.1);
+            color: var(--text-secondary);
         }
 
         .number {
@@ -512,14 +533,21 @@
         }
 
         .reason-cell {
-            max-width: 150px;
             font-size: 12px;
+            overflow: hidden;
         }
 
         .reason-content {
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+
+        .reason-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
         }
 
         .dart-link-btn {
@@ -600,7 +628,7 @@
         .loading-overlay {
             position: fixed;
             inset: 0;
-            background: rgba(11, 19, 36, 0.8);
+            background: rgba(9, 9, 11, 0.8);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -700,6 +728,12 @@
         .hidden {
             display: none !important;
         }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
     </style>
 </head>
 <body>
@@ -722,7 +756,9 @@
                 </div>
                 <div class="header-actions">
                     <button class="theme-toggle" onclick="toggleTheme()" title="테마 전환">
-                        <span id="themeIcon">🌙</span>
+                        <span id="themeIcon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                        </span>
                     </button>
                 </div>
             </div>
@@ -755,7 +791,7 @@
                             <span id="fetchBtnText">데이터 불러오기</span>
                         </button>
                         <button class="btn btn-ghost" onclick="downloadCSV()" id="csvBtn" disabled>
-                            📥 CSV 다운로드
+                            CSV 다운로드
                         </button>
                     </div>
                 </div>
@@ -776,7 +812,7 @@
         <div class="stats-grid" id="statsGrid">
             <div class="stat-card">
                 <div class="stat-header">
-                    <div class="stat-icon">🏢</div>
+                    <div class="stat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
                     <span class="stat-title">참여 기업</span>
                 </div>
                 <div class="stat-value" id="statCompanies">-</div>
@@ -784,7 +820,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-header">
-                    <div class="stat-icon">👔</div>
+                    <div class="stat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
                     <span class="stat-title">참여 임원</span>
                 </div>
                 <div class="stat-value" id="statExecutives">-</div>
@@ -792,7 +828,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-header">
-                    <div class="stat-icon">📈</div>
+                    <div class="stat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
                     <span class="stat-title">총 매입 주식수</span>
                 </div>
                 <div class="stat-value" id="statShares">-</div>
@@ -800,7 +836,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-header">
-                    <div class="stat-icon">🏆</div>
+                    <div class="stat-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>
                     <span class="stat-title">최다 매입 기업</span>
                 </div>
                 <div class="stat-value" id="statTopCompany" style="font-size: 24px;">-</div>
@@ -811,13 +847,13 @@
         <!-- Charts -->
         <div class="charts-section">
             <div class="chart-card">
-                <div class="chart-title">📊 기업별 매입 현황 TOP 10</div>
+                <div class="chart-title">기업별 매입 현황 TOP 10</div>
                 <div class="chart-container">
                     <canvas id="barChart"></canvas>
                 </div>
             </div>
             <div class="chart-card">
-                <div class="chart-title">🥧 시장 구분</div>
+                <div class="chart-title">시장 구분</div>
                 <div class="chart-container">
                     <canvas id="donutChart"></canvas>
                 </div>
@@ -827,7 +863,7 @@
         <!-- Data Table -->
         <div class="table-card">
             <div class="table-header">
-                <div class="table-title">📋 상세 데이터</div>
+                <div class="table-title">상세 데이터</div>
                 <div class="table-actions">
                     <select id="pageSizeSelect" class="page-size-select" onchange="changePageSize()">
                         <option value="20">20건</option>
@@ -842,26 +878,24 @@
                 <table id="dataTable">
                     <thead>
                         <tr>
-                            <th onclick="sortTable(0)">No</th>
+                            <th onclick="sortTable(0)" class="text-center">No</th>
                             <th onclick="sortTable(1)">기업명</th>
-                            <th onclick="sortTable(2)">종목코드</th>
-                            <th onclick="sortTable(3)">시장</th>
-                            <th onclick="sortTable(4)">임원명</th>
-                            <th onclick="sortTable(5)">직위</th>
+                            <th onclick="sortTable(2)" class="text-center">종목코드</th>
+                            <th onclick="sortTable(3)" class="text-center">시장</th>
+                            <th onclick="sortTable(4)" class="text-center">임원명</th>
+                            <th onclick="sortTable(5)" class="text-center">직위</th>
                             <th onclick="sortTable(6)" class="text-right">매수주식수</th>
                             <th onclick="sortTable(7)" class="text-right">발행주식총수</th>
-                            <th onclick="sortTable(8)" class="text-right">변동후지분율</th>
+                            <th onclick="sortTable(8)" class="text-right">지분율</th>
                             <th onclick="sortTable(9)">변동사유</th>
-                            <th onclick="sortTable(10)">보고일</th>
+                            <th onclick="sortTable(10)" class="text-center">보고일</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody">
                         <tr>
                             <td colspan="11">
                                 <div class="empty-state">
-                                    <div class="empty-icon">📊</div>
-                                    <div class="empty-title">데이터가 없습니다</div>
-                                    <div>데이터를 불러오는 중입니다...</div>
+                                    <div class="empty-title">데이터를 불러오는 중입니다...</div>
                                 </div>
                             </td>
                         </tr>
@@ -948,7 +982,9 @@
             const html = document.documentElement;
             const isDark = html.getAttribute('data-theme') === 'dark';
             html.setAttribute('data-theme', isDark ? 'light' : 'dark');
-            document.getElementById('themeIcon').textContent = isDark ? '☀️' : '🌙';
+            document.getElementById('themeIcon').innerHTML = isDark
+                ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+                : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
             updateChartsTheme();
         }
 
@@ -1212,9 +1248,8 @@
             if (pageData.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8">
+                        <td colspan="11">
                             <div class="empty-state">
-                                <div class="empty-icon">📊</div>
                                 <div class="empty-title">데이터가 없습니다</div>
                                 <div>선택한 기간에 임원 자사주 매입 데이터가 없습니다.</div>
                             </div>
@@ -1227,22 +1262,24 @@
 
             tbody.innerHTML = pageData.map((d, i) => `
                 <tr>
-                    <td class="number">${start + i + 1}</td>
+                    <td class="number text-center">${start + i + 1}</td>
                     <td><strong>${d.corp_name}</strong></td>
-                    <td class="number">${d.stock_code}</td>
-                    <td><span class="market-badge market-${d.market === '코스피' ? 'kospi' : 'kosdaq'}">${d.market}</span></td>
-                    <td>${d.exec_name}</td>
-                    <td>${d.position}</td>
+                    <td class="number text-center">${d.stock_code}</td>
+                    <td class="text-center"><span class="market-badge market-${d.market === '코스피' ? 'kospi' : d.market === '코스닥' ? 'kosdaq' : 'etc'}">${d.market}</span></td>
+                    <td class="text-center">${d.exec_name}</td>
+                    <td class="text-center">${d.position}</td>
                     <td class="text-right number"><strong>${d.shares.toLocaleString()}</strong></td>
                     <td class="text-right number">${d.total_shares ? d.total_shares.toLocaleString() : '-'}</td>
                     <td class="text-right number">${d.rate}%</td>
-                    <td class="reason-cell" data-rcept="${d.rcept_no}">
+                    <td class="reason-cell" data-rcept="${d.rcept_no}" title="${(d.reason || '').replace(/"/g, '&quot;')}">
                         <div class="reason-content">
                             <span class="reason-text">${d.reason || '<span class="reason-loading">로딩중...</span>'}</span>
-                            <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}" target="_blank" class="dart-link-btn" title="DART 공시 보기">↗</a>
+                            <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}" target="_blank" class="dart-link-btn" title="DART 공시 보기">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                            </a>
                         </div>
                     </td>
-                    <td class="number">${d.report_date || '-'}</td>
+                    <td class="number text-center">${d.report_date || '-'}</td>
                 </tr>
             `).join('');
 
