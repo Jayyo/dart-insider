@@ -9,21 +9,27 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root {
-            --primary: #10B981;
-            --primary-hover: #059669;
-            --accent: #3B82F6;
-            --bg: #09090B;
-            --surface: #18181B;
-            --surface-hover: #27272A;
-            --text: #FAFAFA;
-            --text-secondary: #A1A1AA;
-            --danger: #EF4444;
-            --success: #10B981;
-            --border: #27272A;
-            --gradient-start: #10B981;
-            --gradient-end: #3B82F6;
-        }
+	        :root {
+	            --primary: #10B981;
+	            --primary-hover: #059669;
+	            --accent: #3B82F6;
+	            --accent-hover: #2563EB;
+	            --bg: #09090B;
+	            --surface: #18181B;
+	            --surface-hover: #27272A;
+	            --text: #FAFAFA;
+	            --text-secondary: #A1A1AA;
+	            --danger: #EF4444;
+	            --success: #10B981;
+	            --border: #27272A;
+	            --gradient-start: #10B981;
+	            --gradient-end: #3B82F6;
+	            --border-strong: rgba(255, 255, 255, 0.12);
+	            --terminal-grid: rgba(250, 250, 250, 0.035);
+	            --glow-primary: rgba(16, 185, 129, 0.28);
+	            --glow-accent: rgba(59, 130, 246, 0.22);
+	            --col-reason: 200px;
+	        }
 
         [data-theme="light"] {
             --bg: #F4F4F5;
@@ -40,13 +46,33 @@
             box-sizing: border-box;
         }
 
-        body {
-            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            transition: background 0.3s ease, color 0.3s ease;
-        }
+	        body {
+	            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+	            background: var(--bg);
+	            color: var(--text);
+	            min-height: 100vh;
+	            transition: background 0.3s ease, color 0.3s ease;
+	        }
+	
+	        body::before {
+	            content: '';
+	            position: fixed;
+	            inset: 0;
+	            pointer-events: none;
+	            z-index: 0;
+	            background:
+	                radial-gradient(900px 520px at 18% 0%, rgba(59, 130, 246, 0.14), transparent 60%),
+	                radial-gradient(740px 460px at 92% 18%, rgba(16, 185, 129, 0.12), transparent 55%),
+	                linear-gradient(var(--terminal-grid) 1px, transparent 1px),
+	                linear-gradient(90deg, var(--terminal-grid) 1px, transparent 1px);
+	            background-size: auto, auto, 46px 46px, 46px 46px;
+	            opacity: 0.55;
+	        }
+	
+	        header, main, footer {
+	            position: relative;
+	            z-index: 1;
+	        }
 
         .container {
             max-width: 1400px;
@@ -124,13 +150,14 @@
         }
 
         /* Filter Bar */
-        .filter-bar {
-            background: var(--surface);
-            border-radius: 16px;
-            padding: 24px;
-            margin: 24px 0;
-            border: 1px solid var(--border);
-        }
+	        .filter-bar {
+	            background: var(--surface);
+	            border-radius: 16px;
+	            padding: 24px;
+	            margin: 24px 0;
+	            border: 1px solid var(--border);
+	            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+	        }
 
         .filter-content {
             display: flex;
@@ -193,29 +220,75 @@
             background: rgba(16, 185, 129, 0.1);
         }
 
-        .btn {
-            padding: 12px 24px;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            border: none;
-        }
+	        .btn {
+	            padding: 12px 24px;
+	            border-radius: 10px;
+	            font-size: 14px;
+	            font-weight: 500;
+	            cursor: pointer;
+	            transition: all 0.2s ease;
+	            display: flex;
+	            align-items: center;
+	            gap: 8px;
+	            border: 1px solid rgba(255, 255, 255, 0.08);
+	            background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+	            color: var(--text);
+	            box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+	            position: relative;
+	            isolation: isolate;
+	        }
+	
+	        .btn::after {
+	            content: '';
+	            position: absolute;
+	            inset: 0;
+	            border-radius: inherit;
+	            background: radial-gradient(120% 100% at 10% 0%, rgba(255, 255, 255, 0.18), transparent 45%);
+	            opacity: 0.25;
+	            pointer-events: none;
+	            z-index: -1;
+	        }
+	
+	        .btn:hover {
+	            transform: translateY(-1px);
+	            border-color: rgba(255, 255, 255, 0.12);
+	            filter: brightness(1.06);
+	        }
+	
+	        .btn:active {
+	            transform: translateY(0);
+	            filter: brightness(0.98);
+	        }
+	
+	        .btn:focus-visible {
+	            outline: none;
+	            box-shadow:
+	                0 10px 26px rgba(0, 0, 0, 0.35),
+	                inset 0 1px 0 rgba(255, 255, 255, 0.05),
+	                0 0 0 3px rgba(59, 130, 246, 0.22);
+	        }
 
-        .btn-primary {
-            background: var(--primary);
-            color: white;
-        }
+	        .btn-primary {
+	            background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+	            color: white;
+	            border-color: rgba(255, 255, 255, 0.10);
+	            box-shadow:
+	                0 14px 34px rgba(0, 0, 0, 0.45),
+	                0 0 0 1px rgba(0, 0, 0, 0.35),
+	                0 0 26px var(--glow-primary),
+	                0 0 18px var(--glow-accent),
+	                inset 0 1px 0 rgba(255, 255, 255, 0.14);
+	        }
 
-        .btn-primary:hover {
-            background: var(--primary-hover);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-        }
+	        .btn-primary:hover {
+	            filter: brightness(1.08) saturate(1.04);
+	            box-shadow:
+	                0 16px 40px rgba(0, 0, 0, 0.55),
+	                0 0 0 1px rgba(0, 0, 0, 0.35),
+	                0 0 34px var(--glow-primary),
+	                0 0 22px var(--glow-accent),
+	                inset 0 1px 0 rgba(255, 255, 255, 0.16);
+	        }
 
         .btn-primary:disabled {
             opacity: 0.6;
@@ -224,16 +297,20 @@
             box-shadow: none;
         }
 
-        .btn-ghost {
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text);
-        }
+	        .btn-ghost {
+	            background: rgba(9, 9, 11, 0.12);
+	            border: 1px solid rgba(255, 255, 255, 0.08);
+	            color: var(--text);
+	            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	        }
 
-        .btn-ghost:hover {
-            border-color: var(--text-secondary);
-            background: var(--surface-hover);
-        }
+	        .btn-ghost:hover {
+	            border-color: rgba(255, 255, 255, 0.14);
+	            background: rgba(24, 24, 27, 0.7);
+	            box-shadow:
+	                0 12px 28px rgba(0, 0, 0, 0.35),
+	                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+	        }
 
         .spinner {
             width: 16px;
@@ -384,13 +461,14 @@
         }
 
         /* Data Table */
-        .table-card {
-            background: var(--surface);
-            border-radius: 16px;
-            border: 1px solid var(--border);
-            overflow: hidden;
-            margin-bottom: 24px;
-        }
+	        .table-card {
+	            background: var(--surface);
+	            border-radius: 16px;
+	            border: 1px solid var(--border);
+	            overflow: hidden;
+	            margin-bottom: 24px;
+	            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+	        }
 
         .table-header {
             display: flex;
@@ -450,34 +528,34 @@
             table-layout: fixed;
         }
 
-        /* Column widths */
-        th:nth-child(1) { width: 48px; }
-        th:nth-child(2) { width: 120px; }
-        th:nth-child(3) { width: 78px; }
-        th:nth-child(4) { width: 68px; }
-        th:nth-child(5) { width: 80px; }
-        th:nth-child(6) { width: 90px; }
-        th:nth-child(7) { width: 105px; }
-        th:nth-child(8) { width: 110px; }
-        th:nth-child(9) { width: 70px; }
-        th:nth-child(10) { width: auto; }
-        th:nth-child(11) { width: 90px; }
+	        /* Column widths */
+	        th:nth-child(1) { width: 48px; }
+	        th:nth-child(2) { width: auto; }
+	        th:nth-child(3) { width: 78px; }
+	        th:nth-child(4) { width: 68px; }
+	        th:nth-child(5) { width: 80px; }
+	        th:nth-child(6) { width: 90px; }
+	        th:nth-child(7) { width: 105px; }
+	        th:nth-child(8) { width: 110px; }
+	        th:nth-child(9) { width: 70px; }
+	        th:nth-child(10) { width: var(--col-reason); }
+	        th:nth-child(11) { width: 90px; }
 
-        th {
-            text-align: left;
-            padding: 12px 14px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            background: var(--bg);
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            user-select: none;
-            transition: color 0.2s ease;
-            white-space: nowrap;
-        }
+	        th {
+	            text-align: left;
+	            padding: 12px 14px;
+	            font-size: 11px;
+	            font-weight: 600;
+	            color: var(--text-secondary);
+	            text-transform: uppercase;
+	            letter-spacing: 0.5px;
+	            background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.00));
+	            border-bottom: 1px solid var(--border-strong);
+	            cursor: pointer;
+	            user-select: none;
+	            transition: color 0.2s ease;
+	            white-space: nowrap;
+	        }
 
         th:hover {
             color: var(--primary);
@@ -486,14 +564,18 @@
         th.text-right, td.text-right { text-align: right; }
         th.text-center, td.text-center { text-align: center; }
 
-        td {
-            padding: 12px 14px;
-            font-size: 13px;
-            border-bottom: 1px solid var(--border);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+	        td {
+	            padding: 12px 14px;
+	            font-size: 13px;
+	            border-bottom: 1px solid var(--border);
+	            white-space: nowrap;
+	            overflow: hidden;
+	            text-overflow: ellipsis;
+	        }
+	
+	        tbody tr:nth-child(even) td {
+	            background: rgba(255, 255, 255, 0.015);
+	        }
 
         tr:hover td {
             background: var(--surface-hover);
@@ -532,10 +614,10 @@
             font-style: italic;
         }
 
-        .reason-cell {
-            font-size: 12px;
-            overflow: hidden;
-        }
+	        .reason-cell {
+	            font-size: 12px;
+	            overflow: hidden;
+	        }
 
         .reason-content {
             display: flex;
@@ -543,12 +625,13 @@
             gap: 6px;
         }
 
-        .reason-text {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            flex: 1;
-        }
+	        .reason-text {
+	            overflow: hidden;
+	            text-overflow: ellipsis;
+	            white-space: nowrap;
+	            flex: 1;
+	            min-width: 0;
+	        }
 
         .dart-link-btn {
             display: inline-flex;
@@ -589,25 +672,31 @@
             gap: 8px;
         }
 
-        .page-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            background: transparent;
-            color: var(--text);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
+	        .page-btn {
+	            width: 36px;
+	            height: 36px;
+	            border-radius: 8px;
+	            border: 1px solid rgba(255, 255, 255, 0.10);
+	            background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+	            color: var(--text);
+	            cursor: pointer;
+	            transition: all 0.2s ease;
+	            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	        }
 
-        .page-btn:hover, .page-btn.active {
-            border-color: var(--primary);
-            color: var(--primary);
-        }
+	        .page-btn:hover, .page-btn.active {
+	            border-color: rgba(16, 185, 129, 0.55);
+	            color: var(--primary);
+	            filter: brightness(1.06);
+	        }
 
-        .page-btn.active {
-            background: rgba(16, 185, 129, 0.1);
-        }
+	        .page-btn.active {
+	            background: linear-gradient(135deg, rgba(16, 185, 129, 0.20), rgba(59, 130, 246, 0.16));
+	            box-shadow:
+	                0 10px 22px rgba(0, 0, 0, 0.35),
+	                0 0 18px rgba(16, 185, 129, 0.18),
+	                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+	        }
 
         /* Footer */
         footer {
@@ -1271,14 +1360,14 @@
                     <td class="text-right number"><strong>${d.shares.toLocaleString()}</strong></td>
                     <td class="text-right number">${d.total_shares ? d.total_shares.toLocaleString() : '-'}</td>
                     <td class="text-right number">${d.rate}%</td>
-                    <td class="reason-cell" data-rcept="${d.rcept_no}" title="${(d.reason || '').replace(/"/g, '&quot;')}">
-                        <div class="reason-content">
-                            <span class="reason-text">${d.reason || '<span class="reason-loading">로딩중...</span>'}</span>
-                            <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}" target="_blank" class="dart-link-btn" title="DART 공시 보기">
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                            </a>
-                        </div>
-                    </td>
+	                    <td class="reason-cell" data-rcept="${d.rcept_no}" title="${escapeAttr(d.reason || '')}">
+	                        <div class="reason-content">
+	                            <span class="reason-text">${d.reason || '<span class="reason-loading">로딩중...</span>'}</span>
+	                            <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}" target="_blank" class="dart-link-btn" title="DART 공시 보기">
+	                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+	                            </a>
+	                        </div>
+	                    </td>
                     <td class="number text-center">${d.report_date || '-'}</td>
                 </tr>
             `).join('');
@@ -1376,24 +1465,26 @@
         }
 
         // Load report reason on demand
-        async function loadReason(element, rceptNo) {
-            if (!rceptNo) {
-                element.textContent = '-';
-                return;
-            }
-            element.textContent = '로딩...';
-            try {
-                const response = await fetch(`/api/report-reason?rcept_no=${rceptNo}`);
-                const result = await response.json();
-                const reason = result.reason || '-';
+	        async function loadReason(element, rceptNo) {
+	            if (!rceptNo) {
+	                element.textContent = '-';
+	                return;
+	            }
+	            element.textContent = '로딩...';
+	            try {
+	                const response = await fetch(`/api/report-reason?rcept_no=${rceptNo}`);
+	                const result = await response.json();
+	                const reason = result.reason || '-';
+	                const td = element.closest?.('td');
 
-                // Update element
-                element.outerHTML = reason;
+	                // Update element
+	                element.outerHTML = reason;
+	                if (td) td.title = reason;
 
-                // Update data in allData and filteredData
-                for (const item of allData) {
-                    if (item.rcept_no === rceptNo) {
-                        item.reason = reason;
+	                // Update data in allData and filteredData
+	                for (const item of allData) {
+	                    if (item.rcept_no === rceptNo) {
+	                        item.reason = reason;
                     }
                 }
                 for (const item of filteredData) {
@@ -1436,14 +1527,16 @@
                         const filtered = filteredData.find(d => d.rcept_no === item.rcept_no);
                         if (filtered) filtered.reason = item.reason;
 
-                        // Update the cell if visible
-                        const cell = document.querySelector(`td[data-rcept="${item.rcept_no}"] .reason-text`);
-                        if (cell && cell.querySelector('.reason-loading')) {
-                            cell.innerHTML = item.reason;
-                        }
-                    } catch (err) {
-                        console.error('Failed to load reason:', err);
-                    }
+	                        // Update the cell if visible
+	                        const cell = document.querySelector(`td[data-rcept="${item.rcept_no}"] .reason-text`);
+	                        if (cell && cell.querySelector('.reason-loading')) {
+	                            cell.innerHTML = item.reason;
+	                            const td = cell.closest('td');
+	                            if (td) td.title = item.reason;
+	                        }
+	                    } catch (err) {
+	                        console.error('Failed to load reason:', err);
+	                    }
 
                     // Small delay to avoid overwhelming the server
                     await new Promise(r => setTimeout(r, 100));
@@ -1512,14 +1605,22 @@
         }
 
         // Utility
-        function formatNumber(num) {
-            if (num >= 100000000) {
-                return (num / 100000000).toFixed(1) + '억';
-            } else if (num >= 10000) {
-                return (num / 10000).toFixed(1) + '만';
-            }
-            return num.toLocaleString();
-        }
-    </script>
+	        function formatNumber(num) {
+	            if (num >= 100000000) {
+	                return (num / 100000000).toFixed(1) + '억';
+	            } else if (num >= 10000) {
+	                return (num / 10000).toFixed(1) + '만';
+	            }
+	            return num.toLocaleString();
+	        }
+	
+	        function escapeAttr(value) {
+	            return String(value)
+	                .replace(/&/g, '&amp;')
+	                .replace(/"/g, '&quot;')
+	                .replace(/</g, '&lt;')
+	                .replace(/>/g, '&gt;');
+	        }
+	    </script>
 </body>
 </html>
