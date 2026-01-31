@@ -267,9 +267,9 @@
         .status-bar {
             display: flex;
             align-items: center;
-            gap: 16px;
-            padding: 12px 0;
-            font-size: 13px;
+            gap: 20px;
+            padding: 10px 0;
+            font-size: 12px;
             color: var(--text-secondary);
         }
 
@@ -386,12 +386,16 @@
         }
 
         .chart-title {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
-            margin-bottom: 20px;
+            letter-spacing: 0.3px;
+            margin-bottom: 16px;
+            color: var(--text);
             display: flex;
             align-items: center;
             gap: 8px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
         }
 
         .chart-container {
@@ -417,8 +421,10 @@
         }
 
         .table-title {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
+            letter-spacing: 0.3px;
+            color: var(--text);
         }
 
         .table-actions {
@@ -516,8 +522,13 @@
             text-overflow: ellipsis;
         }
 
-        tr:hover td {
-            background: #0f1722;
+        tbody tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        tbody tr:hover td {
+            background: #0f1722 !important;
+            transition: background 0.15s ease;
         }
 
         .market-badge {
