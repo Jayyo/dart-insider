@@ -1,695 +1,412 @@
 """
-DART Insider Web Server
-FastAPI backend with Supabase DB + DART API proxy
+DART Insider web server.
+
+Serves index.html and a small JSON API that turns OpenDART insider ownership
+filings (임원ㆍ주요주주특정증권등소유상황보고서) into buy/sell records.
 """
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-import httpx
 import asyncio
-from typing import Optional
-from pydantic import BaseModel
-from datetime import datetime, timedelta, date
-import os
 import logging
-import time
-import json
-import zipfile
-import io
+import os
+import random
 import re
+import time
+import weakref
+from collections import OrderedDict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-# Load .env file if exists
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+
+import filings
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# httpx logs every request URL at INFO level, and OpenDART URLs carry the API key.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+log = logging.getLogger("dart_insider")
 
-app = FastAPI(title="DART Insider API")
+ROOT = Path(__file__).resolve().parent
+KST = timezone(timedelta(hours=9))
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+DART_API_KEY = os.getenv("DART_API_KEY", "").strip()
+DART_BASE_URL = os.getenv("DART_BASE_URL", "https://opendart.fss.or.kr/api").strip().rstrip("/")
 
-# Custom logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    client_ip = request.client.host if request.client else "unknown"
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    real_ip = forwarded_for.split(",")[0].strip() if forwarded_for else client_ip
-    method = request.method
-    path = request.url.path
-    query = str(request.query_params) if request.query_params else ""
-    response = await call_next(request)
-    duration = round((time.time() - start_time) * 1000, 2)
-    logger.info(
-        f"IP: {real_ip} | {method} {path} | Query: {query} | "
-        f"Status: {response.status_code} | Time: {duration}ms"
-    )
-    return response
+# OpenDART blocks clients that send bursts of requests, so each instance
+# spaces its calls out and stops before the per-key daily quota (20,000).
+DART_REQUESTS_PER_SECOND = 8
+DART_DAILY_BUDGET = 15000
+DOC_CONCURRENCY = 4
+DAY_TIME_BUDGET = 12.0  # seconds per request; the client asks again for the rest
+MAX_LOOKBACK_DAYS = 366
+LOADS_PER_CLIENT = 90  # uncached days one client may trigger per 10 minutes
 
-# Configuration
-API_KEY = os.getenv("DART_API_KEY", "")
-BASE_URL = os.getenv("DART_BASE_URL", "https://opendart.fss.or.kr/api")
-
-# Supabase configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://zlhybabcuyigewbevqcp.supabase.co")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-CRON_SECRET = os.getenv("CRON_SECRET", "")
-
-# Lazy-loaded Supabase client
-_supabase_client = None
-
-def get_supabase():
-    global _supabase_client
-    if _supabase_client is None:
-        from supabase import create_client
-        if not SUPABASE_SERVICE_KEY:
-            raise RuntimeError("SUPABASE_SERVICE_KEY not set")
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    return _supabase_client
-
-
-# RPT_RSN code mapping table
-RPT_RSN_MAP = {
-    "01": "장내매수(+)", "02": "장외매수(+)",
-    "11": "장내매도(-)", "12": "장외매도(-)",
-    "21": "유상신주취득(+)", "22": "신주인수권행사(+)",
-    "23": "무상신주취득(+)", "24": "제3자배정유상증자(+)",
-    "25": "스톡옵션행사(+)", "26": "전환권행사(+)",
-    "27": "교환권행사(+)", "29": "신규상장(+)",
-    "31": "신규선임(+)", "98": "기타(-)", "99": "기타(+)",
+DART_ERRORS = {
+    "010": (503, "등록되지 않은 OpenDART API 키입니다."),
+    "011": (503, "사용할 수 없는 OpenDART API 키입니다."),
+    "012": (502, "OpenDART가 이 서버의 IP를 허용하지 않습니다. 국내 리전이나 DART_BASE_URL 프록시가 필요합니다."),
+    "020": (429, "OpenDART 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요."),
+    "800": (503, "OpenDART 시스템 점검 중입니다."),
+    "901": (503, "OpenDART API 키의 이용 기간이 만료되었습니다."),
 }
 
-
-@app.get("/")
-async def root():
-    """Serve the main HTML page"""
-    return FileResponse("index.html")
+app = FastAPI(title="DART Insider", docs_url=None, redoc_url=None, openapi_url=None)
 
 
-@app.get("/api/purchases")
-async def get_purchases(
-    start_date: str = Query(..., description="Start date (YYYYMMDD)"),
-    end_date: str = Query(..., description="End date (YYYYMMDD)"),
-    force_refresh: bool = Query(False, description="Force refresh from DART API")
-):
-    """
-    Get executive stock purchases for a date range.
-    1. Check Supabase DB first
-    2. If no data found (or force_refresh), fetch from DART API and store in DB
-    """
-    try:
-        # Parse dates
-        start_dt = datetime.strptime(start_date, "%Y%m%d").date()
-        end_dt = datetime.strptime(end_date, "%Y%m%d").date()
-
-        if not force_refresh:
-            # Try DB first
-            db_result = await get_from_db(start_dt, end_dt)
-            if db_result is not None:
-                return db_result
-
-        # DB miss or force_refresh: fetch from DART API
-        logger.info(f"Fetching from DART API for {start_date}-{end_date}...")
-        result = await fetch_from_dart(start_date, end_date)
-
-        # Store in DB (background, non-blocking for response)
-        if result["success"] and result["data"]:
-            asyncio.create_task(store_to_db(result["data"], start_dt, end_dt))
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Error in get_purchases: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+class UpstreamError(Exception):
+    def __init__(self, message, status=502, fatal=True):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.fatal = fatal
 
 
-async def get_from_db(start_dt: date, end_dt: date) -> Optional[dict]:
-    """Query Supabase DB for cached data within date range"""
-    try:
-        sb = get_supabase()
+class TTLCache:
+    def __init__(self, max_items):
+        self.items = OrderedDict()
+        self.max_items = max_items
 
-        # Check if all dates in range have been updated
-        result = sb.table("update_log") \
-            .select("update_date, records_count, created_at") \
-            .gte("update_date", start_dt.isoformat()) \
-            .lte("update_date", end_dt.isoformat()) \
-            .eq("status", "success") \
-            .execute()
-
-        updated_dates = {row["update_date"] for row in result.data}
-        # Get the most recent update timestamp
-        last_updated_at = max((row["created_at"] for row in result.data), default=None) if result.data else None
-
-        # Check coverage: count business days roughly
-        # If we have at least some data, return it
-        if not updated_dates:
+    def get(self, key):
+        hit = self.items.get(key)
+        if hit is None:
             return None
-
-        # Fetch purchases from DB
-        purchases = sb.table("executive_purchases") \
-            .select("*") \
-            .gte("report_date", start_dt.isoformat()) \
-            .lte("report_date", end_dt.isoformat()) \
-            .order("shares", desc=True) \
-            .execute()
-
-        if not purchases.data:
+        expires, value = hit
+        if expires is not None and expires < time.monotonic():
+            del self.items[key]
             return None
+        self.items.move_to_end(key)
+        return value
 
-        # Format response
-        data = []
-        for p in purchases.data:
-            data.append({
-                "corp_name": p["corp_name"],
-                "stock_code": p.get("stock_code", ""),
-                "market": p["market"],
-                "exec_name": p["exec_name"],
-                "position": p.get("position", ""),
-                "shares": p["shares"],
-                "rate": p.get("rate", ""),
-                "report_date": p.get("report_date", ""),
-                "total_shares": p.get("total_shares", 0),
-                "reason": p.get("reason", ""),
-                "rcept_no": p.get("rcept_no", ""),
-            })
-
-        stats = compute_stats(data)
-
-        logger.info(f"DB HIT: {len(data)} records for {start_dt}-{end_dt}")
-        return {
-            "success": True,
-            "data": data,
-            "stats": stats,
-            "source": "database",
-            "last_updated": last_updated_at,
-            "message": f"총 {len(data)}건의 임원 자사주 매입 데이터를 조회했습니다. (DB)"
-        }
-
-    except Exception as e:
-        logger.error(f"DB query error: {e}")
-        return None
+    def put(self, key, value, ttl=None):
+        self.items[key] = (time.monotonic() + ttl if ttl else None, value)
+        self.items.move_to_end(key)
+        while len(self.items) > self.max_items:
+            self.items.popitem(last=False)
 
 
-async def store_to_db(data: list, start_dt: date, end_dt: date):
-    """Store fetched data to Supabase DB"""
-    try:
-        sb = get_supabase()
+class Throttle:
+    """Hands out evenly spaced time slots. No asyncio primitives, so it is
+    safe to share across event loops."""
 
-        # Group by report_date
-        by_date = {}
-        for item in data:
-            rd = item.get("report_date", "")
-            if rd:
-                by_date.setdefault(rd, []).append(item)
+    def __init__(self, per_second):
+        self.interval = 1.0 / per_second
+        self.next_at = 0.0
 
-        for report_date, items in by_date.items():
-            rows = []
-            for item in items:
-                # Parse report_date to proper format
-                rd = item.get("report_date", "")
-                if len(rd) == 8:
-                    rd = f"{rd[:4]}-{rd[4:6]}-{rd[6:8]}"
-
-                rows.append({
-                    "corp_name": item["corp_name"],
-                    "stock_code": item.get("stock_code", ""),
-                    "market": item["market"],
-                    "exec_name": item["exec_name"],
-                    "position": item.get("position", ""),
-                    "shares": item["shares"],
-                    "rate": item.get("rate", ""),
-                    "report_date": rd,
-                    "total_shares": item.get("total_shares", 0),
-                    "reason": item.get("reason", ""),
-                    "rcept_no": item.get("rcept_no", ""),
-                })
-
-            if rows:
-                # Upsert to avoid duplicates
-                sb.table("executive_purchases").upsert(
-                    rows,
-                    on_conflict="corp_name,exec_name,report_date,shares"
-                ).execute()
-
-                # Parse date for update_log
-                rd_parsed = report_date
-                if len(rd_parsed) == 8:
-                    rd_parsed = f"{rd_parsed[:4]}-{rd_parsed[4:6]}-{rd_parsed[6:8]}"
-
-                sb.table("update_log").upsert(
-                    {
-                        "update_date": rd_parsed,
-                        "records_count": len(rows),
-                        "status": "success"
-                    },
-                    on_conflict="update_date"
-                ).execute()
-
-        logger.info(f"Stored {len(data)} records to DB for {start_dt}-{end_dt}")
-
-    except Exception as e:
-        logger.error(f"DB store error: {e}")
+    async def wait(self):
+        now = time.monotonic()
+        slot = max(now, self.next_at)
+        self.next_at = slot + self.interval
+        if slot > now:
+            await asyncio.sleep(slot - now)
 
 
-def compute_stats(data: list) -> dict:
-    """Compute summary stats from purchase data"""
-    companies = len(set(p["corp_name"] for p in data))
-    executives = len(data)
-    total_shares = sum(p["shares"] for p in data)
+class ClientLimiter:
+    """Caps how many uncached days one client can make this instance fetch."""
 
-    company_shares = {}
-    for p in data:
-        company_shares[p["corp_name"]] = company_shares.get(p["corp_name"], 0) + p["shares"]
+    def __init__(self, limit, window):
+        self.limit = limit
+        self.window = window
+        self.hits = {}
 
-    top_company = ""
-    top_company_shares = 0
-    if company_shares:
-        top_company = max(company_shares, key=company_shares.get)
-        top_company_shares = company_shares[top_company]
+    def allow(self, key):
+        now = time.monotonic()
+        recent = [t for t in self.hits.get(key, ()) if now - t < self.window]
+        allowed = len(recent) < self.limit
+        if allowed:
+            recent.append(now)
+        self.hits[key] = recent
+        if len(self.hits) > 5000:
+            self.hits = {k: v for k, v in self.hits.items() if v and now - v[-1] < self.window}
+        return allowed
 
-    market_dist = {"코스피": 0, "코스닥": 0, "기타": 0}
-    for p in data:
-        m = p.get("market", "기타")
-        if m in market_dist:
-            market_dist[m] += p["shares"]
+
+class DailyBudget:
+    def __init__(self, limit):
+        self.limit = limit
+        self.day = None
+        self.used = 0
+
+    def spend(self):
+        today = datetime.now(KST).date()
+        if today != self.day:
+            self.day, self.used = today, 0
+        if self.used >= self.limit:
+            raise UpstreamError("오늘 사용할 수 있는 OpenDART 호출량을 모두 사용했습니다.", 429)
+        self.used += 1
+
+
+dart_throttle = Throttle(DART_REQUESTS_PER_SECOND)
+dart_budget = DailyBudget(DART_DAILY_BUDGET)
+client_limiter = ClientLimiter(LOADS_PER_CLIENT, 600)
+
+documents = TTLCache(3000)  # rcept_no -> parsed filing; filings never change
+listings = TTLCache(400)  # day -> list.json rows
+days = TTLCache(400)  # day -> finished response body
+
+_inflight = weakref.WeakKeyDictionary()  # event loop -> {day: task}
+
+
+def inflight_tasks():
+    # Vercel may run each request in a fresh event loop, so tasks are tracked per loop.
+    return _inflight.setdefault(asyncio.get_running_loop(), {})
+
+
+def today_kst():
+    return datetime.now(KST).date()
+
+
+def day_ttl(day):
+    age = (today_kst() - day).days
+    if age <= 0:
+        return 120  # filings for today are still coming in
+    if age <= 7:
+        return 1800  # amendments usually land within a few days
+    return 6 * 3600
+
+
+def client_key(request):
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+
+
+def new_client():
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(8.0, connect=4.0),
+        headers={"User-Agent": "dart-insider (+https://github.com/Jayyo/dart-insider)"},
+        follow_redirects=False,
+    )
+
+
+async def dart_get(client, path, params):
+    if not DART_API_KEY:
+        raise UpstreamError("서버에 DART_API_KEY가 설정되어 있지 않습니다.", 503)
+    for attempt in range(3):
+        await dart_throttle.wait()
+        dart_budget.spend()
+        try:
+            resp = await client.get(f"{DART_BASE_URL}/{path}", params={"crtfc_key": DART_API_KEY, **params})
+        except httpx.TransportError as exc:
+            log.warning("OpenDART %s failed (%s), attempt %d", path, type(exc).__name__, attempt + 1)
+            if attempt == 2:
+                raise UpstreamError("OpenDART에 연결할 수 없습니다.", 502) from exc
         else:
-            market_dist["기타"] += p["shares"]
+            if resp.status_code < 500:
+                if resp.status_code != 200:
+                    raise UpstreamError(f"OpenDART 응답 오류 (HTTP {resp.status_code})", 502)
+                return resp
+            log.warning("OpenDART %s returned HTTP %d, attempt %d", path, resp.status_code, attempt + 1)
+            if attempt == 2:
+                raise UpstreamError(f"OpenDART 응답 오류 (HTTP {resp.status_code})", 502)
+        await asyncio.sleep(0.6 * (attempt + 1))
+
+
+def dart_error(status, message):
+    code, text = DART_ERRORS.get(status, (502, f"OpenDART 오류 {status}: {message or ''}".strip()))
+    return UpstreamError(text, code)
+
+
+async def list_filings(client, day):
+    cached = listings.get(day)
+    if cached is not None:
+        return cached
+    rows, page = [], 1
+    ymd = day.strftime("%Y%m%d")
+    while True:
+        resp = await dart_get(client, "list.json", {
+            "bgn_de": ymd,
+            "end_de": ymd,
+            "pblntf_detail_ty": "D002",  # 임원ㆍ주요주주특정증권등소유상황보고서
+            "last_reprt_at": "Y",        # only the latest version of amended filings
+            "page_count": 100,
+            "page_no": page,
+        })
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise UpstreamError("OpenDART 목록 응답을 해석할 수 없습니다.", 502) from exc
+        status = data.get("status")
+        if status == "013":  # no filings
+            break
+        if status != "000":
+            raise dart_error(status, data.get("message"))
+        rows.extend(data.get("list") or [])
+        if page >= int(data.get("total_page") or 1) or page >= 20:
+            break
+        page += 1
+    items = [filings.list_item(r) for r in rows]
+    listings.put(day, items, ttl=day_ttl(day))
+    return items
+
+
+async def fetch_document(client, rcept_no):
+    resp = await dart_get(client, "document.xml", {"rcept_no": rcept_no})
+    content = resp.content
+    if not content.startswith(b"PK"):
+        status = re.search(rb'"?status"?\s*[:>]\s*"?(\d{3})', content[:500])
+        if status and status.group(1).decode() in DART_ERRORS:
+            raise dart_error(status.group(1).decode(), "")
+        raise UpstreamError(f"{rcept_no} 원문을 받을 수 없습니다.", 502, fatal=False)
+    try:
+        return filings.parse_document(filings.read_document_zip(content))
+    except Exception as exc:
+        log.warning("Could not parse %s: %s", rcept_no, exc)
+        raise UpstreamError(f"{rcept_no} 원문을 해석할 수 없습니다.", 502, fatal=False) from exc
+
+
+async def fetch_documents(client, items, deadline):
+    """Fetch and parse documents until the deadline. Returns (parsed, failed)."""
+    semaphore = asyncio.Semaphore(DOC_CONCURRENCY)
+
+    async def one(item):
+        async with semaphore:
+            return await fetch_document(client, item["rcept_no"])
+
+    tasks = {asyncio.ensure_future(one(item)): item for item in items}
+    parsed, failed, waiting = {}, [], set(tasks)
+    try:
+        while waiting:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            done, waiting = await asyncio.wait(waiting, timeout=remaining, return_when=asyncio.FIRST_EXCEPTION)
+            for task in done:
+                item, exc = tasks[task], task.exception()
+                if exc is None:
+                    parsed[item["rcept_no"]] = task.result()
+                elif isinstance(exc, UpstreamError) and exc.fatal:
+                    raise exc
+                else:
+                    failed.append(item)
+    finally:
+        for task in waiting:
+            task.cancel()
+        if waiting:
+            await asyncio.wait(waiting)
+        for task in tasks:
+            if not task.cancelled():
+                task.exception()  # mark as retrieved; the first fatal one was already raised
+    return parsed, failed
+
+
+async def load_day(day):
+    deadline = time.monotonic() + DAY_TIME_BUDGET
+    async with new_client() as client:
+        items = await list_filings(client, day)
+        parsed = {}
+        todo = []
+        for item in items:
+            doc = documents.get(item["rcept_no"])
+            if doc is None:
+                todo.append(item)
+            else:
+                parsed[item["rcept_no"]] = doc
+        # A retry may land on another instance; a different order lets it make progress there too.
+        random.shuffle(todo)
+        fetched, failed = await fetch_documents(client, todo, deadline)
+
+    for rcept_no, doc in fetched.items():
+        documents.put(rcept_no, doc)
+    parsed.update(fetched)
+    failed_ids = {item["rcept_no"] for item in failed}
+
+    records, pending, other = [], [], 0
+    for item in items:
+        doc = parsed.get(item["rcept_no"])
+        if doc is None:
+            if item["rcept_no"] not in failed_ids:
+                pending.append(item["rcept_no"])
+        elif doc["buy"]["shares"] or doc["sell"]["shares"]:
+            records.append(filings.public_record(item, doc))
+        else:
+            other += 1
 
     return {
-        "companies": companies,
-        "executives": executives,
-        "total_shares": total_shares,
-        "top_company": top_company,
-        "top_company_shares": top_company_shares,
-        "market_distribution": market_dist,
+        "date": day.isoformat(),
+        "complete": not pending and not failed,
+        "filings": records,
+        "pending": pending,
+        "failed": [{k: item[k] for k in ("rcept_no", "corp_name", "filer")} for item in failed],
+        "summary": {"total": len(items), "trades": len(records), "other": other,
+                    "failed": len(failed), "pending": len(pending)},
+        "fetched_at": datetime.now(KST).isoformat(timespec="seconds"),
     }
 
 
-async def fetch_from_dart(start_date: str, end_date: str) -> dict:
-    """Fetch executive purchase data from DART API (original logic)"""
-    start_dt = start_date
-    end_dt = end_date
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Step 1: Get all disclosures
-        disclosures = await get_all_disclosures(client, start_date, end_date)
-
-        # Step 2: Filter for executive reports
-        keywords = ["임원", "주요주주", "소유상황"]
-        unique_corps = {}
-
-        for d in disclosures:
-            report_nm = d.get("report_nm", "")
-            if any(kw in report_nm for kw in keywords):
-                corp_code = d.get("corp_code")
-                if corp_code and corp_code not in unique_corps:
-                    unique_corps[corp_code] = {
-                        "corp_name": d.get("corp_name"),
-                        "corp_cls": d.get("corp_cls"),
-                        "stock_code": d.get("stock_code", "")
-                    }
-
-        logger.info(f"Found {len(unique_corps)} companies with executive reports")
-
-        # Step 3: Get executive stock ownership for each company
-        all_purchases = []
-
-        for i, (corp_code, corp_info) in enumerate(unique_corps.items()):
-            try:
-                stock_list = await get_executive_stock(client, corp_code)
-
-                for item in stock_list:
-                    rcept_dt = item.get("rcept_dt", "").replace("-", "")
-                    if not rcept_dt or rcept_dt < start_dt or rcept_dt > end_dt:
-                        continue
-
-                    is_exec = item.get("isu_exctv_rgist_at", "") in ["등록", "등기임원", "비등기임원"]
-                    ofcps = item.get("isu_exctv_ofcps", "")
-                    has_position = ofcps and ofcps != "-" and len(ofcps) > 0
-
-                    irds_cnt_str = item.get("sp_stock_lmp_irds_cnt", "0")
-                    try:
-                        irds_cnt = int(str(irds_cnt_str).replace(",", "").replace("-", "0"))
-                    except:
-                        irds_cnt = 0
-
-                    if (is_exec or has_position) and irds_cnt > 0:
-                        market = corp_info["corp_cls"]
-                        if market == "Y":
-                            market = "코스피"
-                        elif market == "K":
-                            market = "코스닥"
-                        else:
-                            market = "기타"
-
-                        all_purchases.append({
-                            "corp_code": corp_code,
-                            "rcept_no": item.get("rcept_no", ""),
-                            "corp_name": corp_info["corp_name"],
-                            "stock_code": corp_info["stock_code"],
-                            "market": market,
-                            "exec_name": item.get("repror", ""),
-                            "position": ofcps,
-                            "shares": irds_cnt,
-                            "rate": item.get("sp_stock_lmp_rate", ""),
-                            "report_date": item.get("rcept_dt", ""),
-                            "total_shares": 0
-                        })
-
-                if (i + 1) % 50 == 0:
-                    await asyncio.sleep(0.3)
-
-            except Exception as e:
-                logger.error(f"Error fetching {corp_code}: {e}")
-                continue
-
-        # Fetch total shares
-        unique_corp_codes = list(set(p["corp_code"] for p in all_purchases))
-        logger.info(f"Fetching total shares for {len(unique_corp_codes)} companies...")
-
-        async def fetch_total_shares_batch(corp_codes):
-            results = {}
-            for i in range(0, len(corp_codes), 10):
-                batch = corp_codes[i:i+10]
-                tasks = [get_total_shares(client, cc) for cc in batch]
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                for cc, result in zip(batch, batch_results):
-                    results[cc] = result if isinstance(result, int) else 0
-                await asyncio.sleep(0.2)
-            return results
-
-        total_shares_map = await fetch_total_shares_batch(unique_corp_codes)
-
-        for p in all_purchases:
-            p["total_shares"] = total_shares_map.get(p["corp_code"], 0)
-
-        # Sort by shares descending
-        all_purchases.sort(key=lambda x: x["shares"], reverse=True)
-
-        # Remove corp_code from response
-        response_purchases = [{k: v for k, v in p.items() if k != "corp_code"} for p in all_purchases]
-
-        stats = compute_stats(response_purchases)
-
-        return {
-            "success": True,
-            "data": response_purchases,
-            "stats": stats,
-            "source": "dart_api",
-            "message": f"총 {len(response_purchases)}건의 임원 자사주 매입 데이터를 조회했습니다."
-        }
-
-
-async def get_all_disclosures(client: httpx.AsyncClient, start_date: str, end_date: str) -> list:
-    """Get all disclosure pages from DART API"""
-    all_disclosures = []
-    page_no = 1
-
-    while True:
-        url = f"{BASE_URL}/list.json"
-        params = {
-            "crtfc_key": API_KEY,
-            "bgn_de": start_date,
-            "end_de": end_date,
-            "page_count": 100,
-            "page_no": page_no
-        }
-
-        response = await client.get(url, params=params)
-        data = response.json()
-
-        if data.get("status") != "000":
-            if data.get("status") == "013":
-                break
-            raise Exception(f"DART API Error: {data.get('message')}")
-
-        all_disclosures.extend(data.get("list", []))
-
-        total_page = data.get("total_page", 1)
-        if page_no >= total_page:
-            break
-
-        page_no += 1
-        await asyncio.sleep(0.1)
-
-    return all_disclosures
-
-
-async def get_executive_stock(client: httpx.AsyncClient, corp_code: str) -> list:
-    """Get executive stock ownership for a company"""
-    url = f"{BASE_URL}/elestock.json"
-    params = {"crtfc_key": API_KEY, "corp_code": corp_code}
-    response = await client.get(url, params=params)
-    data = response.json()
-    if data.get("status") == "000":
-        return data.get("list", [])
-    return []
-
-
-# Cache for total shares data
-total_shares_cache = {}
-
-async def get_total_shares(client: httpx.AsyncClient, corp_code: str) -> int:
-    """Get total issued shares for a company"""
-    if corp_code in total_shares_cache:
-        return total_shares_cache[corp_code]
-
-    current_year = datetime.now().year
-    report_codes = ["11011", "11014", "11012", "11013"]
-
-    for year in [current_year, current_year - 1]:
-        for reprt_code in report_codes:
-            try:
-                url = f"{BASE_URL}/stockTotqySttus.json"
-                params = {
-                    "crtfc_key": API_KEY,
-                    "corp_code": corp_code,
-                    "bsns_year": str(year),
-                    "reprt_code": reprt_code
-                }
-                response = await client.get(url, params=params)
-                data = response.json()
-
-                if data.get("status") == "000":
-                    stock_list = data.get("list", [])
-                    total = 0
-                    for item in stock_list:
-                        try:
-                            istc_totqy = item.get("istc_totqy", "0")
-                            total += int(str(istc_totqy).replace(",", "").replace("-", "0"))
-                        except:
-                            pass
-                    if total > 0:
-                        total_shares_cache[corp_code] = total
-                        return total
-            except:
-                continue
-
-    total_shares_cache[corp_code] = 0
-    return 0
-
-
-# Cache for report reasons
-report_reason_cache = {}
-
-async def get_report_reason(client: httpx.AsyncClient, rcept_no: str) -> str:
-    """Get report reason from disclosure document"""
-    if rcept_no in report_reason_cache:
-        return report_reason_cache[rcept_no]
-
+def parse_day(value):
+    if not re.fullmatch(r"\d{8}", value):
+        raise HTTPException(400, "날짜는 YYYYMMDD 형식이어야 합니다.")
     try:
-        url = f"{BASE_URL}/document.xml"
-        params = {"crtfc_key": API_KEY, "rcept_no": rcept_no}
-        response = await client.get(url, params=params)
-        if response.status_code != 200:
-            return ""
-
-        zip_buffer = io.BytesIO(response.content)
-        with zipfile.ZipFile(zip_buffer, 'r') as zf:
-            for filename in zf.namelist():
-                if filename.endswith('.xml'):
-                    xml_content = zf.read(filename).decode('utf-8')
-                    reasons = []
-
-                    rpt_rsn_matches = re.findall(
-                        r'AUNIT="RPT_RSN"[^>]*AUNITVALUE="(\d+)"[^>]*>([^<]*)',
-                        xml_content
-                    )
-                    for code, text in rpt_rsn_matches:
-                        reason_text = text.strip() if text.strip() else RPT_RSN_MAP.get(code, f"코드{code}")
-                        if reason_text and reason_text not in reasons:
-                            reasons.append(reason_text)
-
-                    if not reasons:
-                        chn_match = re.search(r'ACODE="CHN_RSN"[^>]*>([^<]+)', xml_content)
-                        if chn_match:
-                            reasons.append(chn_match.group(1).strip())
-
-                    if reasons:
-                        result = ", ".join(dict.fromkeys(reasons))
-                        report_reason_cache[rcept_no] = result
-                        return result
-
-        report_reason_cache[rcept_no] = ""
-        return ""
-    except Exception as e:
-        logger.error(f"Error fetching report reason for {rcept_no}: {e}")
-        return ""
+        day = datetime.strptime(value, "%Y%m%d").date()
+    except ValueError:
+        raise HTTPException(400, "존재하지 않는 날짜입니다.")
+    today = today_kst()
+    if day > today or day < today - timedelta(days=MAX_LOOKBACK_DAYS):
+        raise HTTPException(400, f"최근 {MAX_LOOKBACK_DAYS}일 이내의 날짜만 조회할 수 있습니다.")
+    return day
 
 
-@app.get("/api/report-reason")
-async def get_report_reason_api(rcept_no: str = Query(..., description="Report number")):
-    """Get the reason for stock change from disclosure document"""
-    # Check DB first
-    try:
-        sb = get_supabase()
-        result = sb.table("executive_purchases") \
-            .select("reason") \
-            .eq("rcept_no", rcept_no) \
-            .not_.is_("reason", "null") \
-            .neq("reason", "") \
-            .limit(1) \
-            .execute()
-        if result.data and result.data[0].get("reason"):
-            return {"rcept_no": rcept_no, "reason": result.data[0]["reason"]}
-    except:
-        pass
-
-    # Fallback to DART API
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        reason = await get_report_reason(client, rcept_no)
-
-        # Store reason back to DB
-        if reason:
-            try:
-                sb = get_supabase()
-                sb.table("executive_purchases") \
-                    .update({"reason": reason}) \
-                    .eq("rcept_no", rcept_no) \
-                    .execute()
-            except:
-                pass
-
-        return {"rcept_no": rcept_no, "reason": reason}
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    started = time.monotonic()
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
+            "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        )
+    if request.url.path.startswith("/api/"):
+        log.info("%s %s %d %.0fms", request.method, request.url.path, response.status_code,
+                 (time.monotonic() - started) * 1000)
+    return response
 
 
-@app.get("/api/cron/update")
-async def cron_update(
-    secret: str = Query("", description="Cron secret for auth"),
-    date: Optional[str] = Query(None, description="Specific date YYYYMMDD (default: today)")
-):
-    """
-    Daily cron endpoint to update today's data.
-    Called by Vercel Cron or manually with ?secret=xxx
-    """
-    # Verify cron secret
-    auth_header = ""
-    if not secret:
-        # Also check Authorization header (Vercel sends this)
-        return {"success": False, "message": "Unauthorized"}
+@app.exception_handler(UpstreamError)
+async def upstream_error(_request, exc):
+    return JSONResponse({"detail": exc.message}, status_code=exc.status, headers={"Cache-Control": "no-store"})
 
-    if not CRON_SECRET or secret != CRON_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid cron secret")
 
-    # Determine target date
-    if date:
-        target_date = date
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+async def index():
+    return FileResponse(ROOT / "index.html", headers={"Cache-Control": "public, max-age=0, s-maxage=600"})
+
+
+@app.get("/api/filings/{value}")
+async def get_filings(value: str, request: Request):
+    day = parse_day(value)
+    body = days.get(day)
+    if body is None:
+        tasks = inflight_tasks()
+        task = tasks.get(day)
+        if task is None:
+            if not client_limiter.allow(client_key(request)):
+                raise HTTPException(429, "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+            task = asyncio.ensure_future(load_day(day))
+            tasks[day] = task
+            task.add_done_callback(lambda _t, d=day: tasks.pop(d, None))
+        body = await asyncio.shield(task)
+        if body["complete"]:
+            days.put(day, body, ttl=day_ttl(day))
+
+    if not body["complete"]:
+        cache = "no-store"  # the client asks again for pending or failed filings
     else:
-        target_date = datetime.now().strftime("%Y%m%d")
-
-    target_dt = datetime.strptime(target_date, "%Y%m%d").date()
-
-    logger.info(f"Cron update started for {target_date}")
-
-    try:
-        sb = get_supabase()
-
-        # Mark as in_progress
-        sb.table("update_log").upsert(
-            {"update_date": target_dt.isoformat(), "status": "in_progress", "records_count": 0},
-            on_conflict="update_date"
-        ).execute()
-
-        # Fetch from DART API
-        result = await fetch_from_dart(target_date, target_date)
-
-        if result["success"]:
-            records = result["data"]
-
-            if records:
-                # Store to DB
-                await store_to_db(records, target_dt, target_dt)
-
-            # Update log
-            sb.table("update_log").upsert(
-                {
-                    "update_date": target_dt.isoformat(),
-                    "records_count": len(records),
-                    "status": "success"
-                },
-                on_conflict="update_date"
-            ).execute()
-
-            logger.info(f"Cron update complete: {len(records)} records for {target_date}")
-            return {
-                "success": True,
-                "date": target_date,
-                "records": len(records),
-                "message": f"{len(records)}건 업데이트 완료"
-            }
-        else:
-            raise Exception("DART API fetch failed")
-
-    except Exception as e:
-        logger.error(f"Cron update error: {e}")
-        try:
-            sb = get_supabase()
-            sb.table("update_log").upsert(
-                {
-                    "update_date": target_dt.isoformat(),
-                    "status": "failed",
-                    "error_message": str(e)
-                },
-                on_conflict="update_date"
-            ).execute()
-        except:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/update-status")
-async def get_update_status():
-    """Get the latest update status from DB"""
-    try:
-        sb = get_supabase()
-        result = sb.table("update_log") \
-            .select("*") \
-            .order("update_date", desc=True) \
-            .limit(10) \
-            .execute()
-        return {"success": True, "data": result.data}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
+        ttl = day_ttl(day)
+        cache = f"public, max-age={min(ttl, 600) // 2}, s-maxage={max(ttl, 300)}, stale-while-revalidate={ttl * 4}"
+    return JSONResponse(body, headers={"Cache-Control": cache})
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT", "8080")))
