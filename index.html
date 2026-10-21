@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js" integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK" crossorigin="anonymous"></script>
     <style>
         :root {
             --bg: #07090d;
@@ -362,7 +363,9 @@
             vertical-align: middle;
         }
 
+        tr.data-row { cursor: pointer; }
         tr.data-row:hover td { background: var(--surface-hover); }
+        tr.data-row.selected td { background: var(--side-soft); }
         td.num { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
 
         .corp { display: flex; align-items: center; gap: 6px; }
@@ -430,7 +433,47 @@
         .page-btn:hover:not(:disabled), .page-btn.active { border-color: var(--primary); color: var(--primary); }
         .page-btn:disabled { opacity: 0.4; cursor: default; }
 
+        /* Detail panel */
+        tr.detail-row > td { padding: 0; white-space: normal; background: var(--surface-alt); }
+        .detail { display: flex; gap: 18px; padding: 16px 18px; border-top: 2px solid var(--side); }
+        .detail-chart { flex: 1; min-width: 0; }
+        .detail-side { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+
+        .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 8px; }
+        .chart-toolbar .divider { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
+
+        .tool-btn {
+            padding: 3px 9px;
+            font: 11px 'IBM Plex Mono', 'IBM Plex Sans KR', monospace;
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .tool-btn:hover { color: var(--text); border-color: var(--text-secondary); }
+        .tool-btn.active { background: var(--side); border-color: var(--side); color: #061018; }
+        .tool-btn.toggle.active { background: transparent; color: var(--text); border-color: var(--ind, var(--text-secondary)); }
+
+        .price-chart { height: 360px; position: relative; }
         .chart-message { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 13px; text-align: center; padding: 0 16px; }
+        .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
+        .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+
+        .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+        .kpi.wide { grid-column: span 2; }
+        .kpi-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 2px; }
+        .kpi-value { font: 600 14px 'IBM Plex Mono', 'IBM Plex Sans KR', monospace; font-variant-numeric: tabular-nums; }
+        .kpi-value.text { font-family: 'IBM Plex Sans KR', sans-serif; font-weight: 500; font-size: 13px; }
+
+        .trade-list { max-height: 172px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+        .trade-list table { font-size: 12px; }
+        .trade-list th { position: sticky; top: 0; padding: 6px 8px; font-size: 10px; }
+        .trade-list td { padding: 5px 8px; font-size: 12px; }
+        .trade-list tr.other td { color: var(--text-secondary); }
+        .detail-note { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 
         footer {
             text-align: center;
@@ -446,6 +489,8 @@
 
         @media (max-width: 1024px) {
             .charts-section { grid-template-columns: 1fr; }
+            .detail { flex-direction: column; }
+            .detail-side { width: 100%; }
         }
 
         @media (max-width: 760px) {
@@ -477,6 +522,9 @@
             #dataTable > tbody > tr.data-row > td[data-label]::before { content: attr(data-label); display: block; font-size: 10px; color: var(--text-secondary); }
             #dataTable > tbody > tr.data-row > td.cell-corp { grid-column: span 2; order: -2; padding-right: 40px; }
             #dataTable > tbody > tr.data-row > td.cell-link { position: absolute; top: 12px; right: 14px; width: auto; }
+            #dataTable > tbody > tr.data-row.selected { background: var(--side-soft); }
+            .detail { padding: 12px; }
+            .price-chart { height: 300px; }
             .pagination { flex-direction: column; }
         }
     </style>
@@ -627,7 +675,7 @@
     </main>
 
     <footer>
-        <div>데이터: <a href="https://opendart.fss.or.kr" target="_blank" rel="noopener">금융감독원 OpenDART</a> 임원ㆍ주요주주특정증권등소유상황보고서</div>
+        <div>데이터: <a href="https://opendart.fss.or.kr" target="_blank" rel="noopener">금융감독원 OpenDART</a> 임원ㆍ주요주주특정증권등소유상황보고서 · 주가: 네이버 금융</div>
         <div>장내·시간외 매매를 집계하고 장외 거래는 선택해서 포함합니다. 주식매수선택권 행사, 증여, 유상증자, 주식병합 등은 매매가 아니므로 제외합니다. 금액은 공시에 적힌 단가로 계산한 값입니다.</div>
         <div>투자 판단의 근거로 쓰기 전에 반드시 공시 원문을 확인하세요. 이 서비스는 투자 조언을 제공하지 않습니다.</div>
     </footer>
@@ -636,6 +684,12 @@
         const MAX_RANGE_DAYS = 31;
         const DAY_CONCURRENCY = 2;
         const DAY_RETRIES = 6;
+        const PERIOD_DAYS = { '3m': 92, '6m': 183, '1y': 366, '2y': 731 };
+        const INDICATORS = [
+            { key: 'ma5', label: 'MA5', period: 5, color: '#f59e0b' },
+            { key: 'ma20', label: 'MA20', period: 20, color: '#38bdf8' },
+            { key: 'ma60', label: 'MA60', period: 60, color: '#a78bfa' },
+        ];
 
         const state = {
             side: 'buy',
@@ -651,9 +705,13 @@
             loadId: 0,
             controller: null,
             loading: false,
+            expanded: null,
+            chart: null,
+            chartOptions: { period: null, tf: 'day', ma5: true, ma20: true, ma60: false, vol: true },
         };
 
-        let barChart, donutChart, renderQueued = false;
+        let barChart, donutChart, renderQueued = false, chartToken = 0;
+        const priceCache = new Map();
         const $ = (id) => document.getElementById(id);
 
         // ---------- formatting ----------
@@ -755,6 +813,7 @@
             state.byDay = new Map();
             state.loading = true;
             state.page = 1;
+            closeDetail();
             hideNotice();
 
             const queue = [];
@@ -1022,6 +1081,7 @@
         }
 
         function applyChartTheme() {
+            if (state.expanded) renderPriceChart();
             if (!barChart) return;
             const c = themeColors();
             for (const chart of [barChart, donutChart]) {
@@ -1056,9 +1116,12 @@
             state.page = Math.min(state.page, pages);
             const start = (state.page - 1) * state.pageSize;
             const rows = state.view.slice(start, start + state.pageSize);
+            // Keep an open chart alive while more days stream in.
+            const openPanel = state.expanded ? document.querySelector('#detailCell > .detail') : null;
 
             tbody.innerHTML = rows.map((r) => {
                 const s = sideOf(r);
+                const selected = state.expanded === r.rcept_no;
                 const partial = s.amount !== null && s.priced_shares < s.shares ? '<span class="partial" title="일부 거래의 단가가 공시에 없습니다">*</span>' : '';
                 const badges = [
                     `<span class="badge market-${esc(r.market)}">${esc(r.market)}</span>`,
@@ -1068,7 +1131,7 @@
                 ].join('');
                 const venues = [...s.venues.filter((v) => v !== '장내'), ...s.securities.filter((k) => k !== '보통주')];
                 return `
-                <tr class="data-row">
+                <tr class="data-row${selected ? ' selected' : ''}" data-rcept="${esc(r.rcept_no)}" tabindex="0" aria-expanded="${selected}">
                     <td class="mono" data-label="보고일">${esc(shortDate(r.report_date))}</td>
                     <td class="cell-corp"><div class="corp"><span class="corp-name" title="${esc(r.corp_name)}">${esc(r.corp_name)}</span>${badges}</div><span class="sub mono">${esc(r.stock_code || '비상장')}</span></td>
                     <td data-label="보고자">${esc(r.reporter)}</td>
@@ -1080,9 +1143,15 @@
                     <td class="num" data-label="보고 후 지분">${formatPct(r.ownership_after)}</td>
                     <td class="cell-link"><a class="dart-link" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${encodeURIComponent(r.rcept_no)}" target="_blank" rel="noopener" title="DART 원문 보기" aria-label="DART 원문 보기">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a></td>
-                </tr>`;
+                </tr>${selected ? '<tr class="detail-row"><td colspan="10" id="detailCell"></td></tr>' : ''}`;
             }).join('');
 
+            if (state.expanded) {
+                const cell = $('detailCell');
+                if (!cell) closeDetail();
+                else if (openPanel && openPanel.dataset.rcept === state.expanded && openPanel.dataset.side === state.side) cell.appendChild(openPanel);
+                else renderDetail();
+            }
             renderPagination(pages, start, rows.length);
         }
 
@@ -1097,6 +1166,233 @@
             for (let p = first; p <= last; p++) html += `<button class="page-btn${p === state.page ? ' active' : ''}" data-page="${p}">${p}</button>`;
             html += `<button class="page-btn" data-page="${state.page + 1}" ${state.page === pages ? 'disabled' : ''} aria-label="다음">›</button>`;
             $('paginationButtons').innerHTML = html;
+        }
+
+        // ---------- detail panel ----------
+        function closeDetail() {
+            if (state.chart) { state.chart.remove(); state.chart = null; }
+            state.expanded = null;
+        }
+
+        function toggleDetail(rcept) {
+            const opening = state.expanded !== rcept;
+            closeDetail();
+            if (opening) {
+                state.expanded = rcept;
+                state.chartOptions.period = null;
+            }
+            renderTable();
+        }
+
+        function selectedRecord() {
+            return state.records.find((r) => r.rcept_no === state.expanded);
+        }
+
+        function renderDetail() {
+            const r = selectedRecord();
+            const cell = $('detailCell');
+            if (!r || !cell) return;
+            const s = sideOf(r);
+            const label = state.side === 'buy' ? '매수' : '매도';
+            const o = state.chartOptions;
+            if (!o.period) {
+                const span = s.first_date ? daysBetween(s.first_date, todayKST()) + 45 : 0;
+                o.period = Object.keys(PERIOD_DAYS).find((p) => PERIOD_DAYS[p] >= Math.max(span, 150)) || '2y';
+            }
+            const tradeRows = r.trades.map((t) => `
+                <tr class="${counts(t) ? '' : 'other'}">
+                    <td class="mono">${esc(shortDate(t.date))}</td>
+                    <td>${esc(t.reason)}${t.security && t.security !== '보통주' ? ` (${esc(t.security)})` : ''}</td>
+                    <td class="num">${formatInt(t.shares)}</td>
+                    <td class="num">${formatInt(t.price)}</td>
+                </tr>`).join('');
+            const plan = r.plan_dates.length ? `<div class="kpi wide"><div class="kpi-label">거래계획 보고일 (공시 기재)</div><div class="kpi-value">${esc(r.plan_dates.join(', '))}</div></div>` : '';
+            const toolbar = [
+                ...Object.keys(PERIOD_DAYS).map((p) => `<button class="tool-btn${o.period === p ? ' active' : ''}" type="button" data-period="${p}">${p.toUpperCase()}</button>`),
+                '<span class="divider"></span>',
+                ...[['day', '일'], ['week', '주'], ['month', '월']].map(([tf, name]) => `<button class="tool-btn${o.tf === tf ? ' active' : ''}" type="button" data-tf="${tf}">${name}</button>`),
+                '<span class="divider"></span>',
+                ...INDICATORS.map((i) => `<button class="tool-btn toggle${o[i.key] ? ' active' : ''}" type="button" data-ind="${i.key}" style="--ind:${i.color}">${i.label}</button>`),
+                `<button class="tool-btn toggle${o.vol ? ' active' : ''}" type="button" data-ind="vol">VOL</button>`,
+            ].join('');
+
+            if (state.chart) { state.chart.remove(); state.chart = null; }
+            cell.innerHTML = `
+                <div class="detail" data-rcept="${esc(r.rcept_no)}" data-side="${state.side}">
+                    <div class="detail-chart">
+                        <div class="chart-toolbar">${toolbar}</div>
+                        <div class="price-chart" id="priceChart"><div class="chart-message">주가를 불러오는 중...</div></div>
+                        <div class="legend">
+                            <span><i style="background:${state.side === 'buy' ? '#21d3a7' : '#f5a524'}"></i>이 보고자의 ${label}</span>
+                            <span><i style="background:#4ea3ff"></i>같은 기간 다른 보고자의 ${label}</span>
+                            <span>--- 평균 ${label}단가</span>
+                        </div>
+                    </div>
+                    <div class="detail-side">
+                        <div class="kpi-grid">
+                            <div class="kpi"><div class="kpi-label">평균 ${label}단가${s.securities.length > 1 ? ' (보통주)' : ''}</div><div class="kpi-value">${formatWon(s.securities.length > 1 ? s.common_avg : s.avg_price)}</div></div>
+                            <div class="kpi"><div class="kpi-label">최근 종가</div><div class="kpi-value" id="lastClose">-</div></div>
+                            <div class="kpi"><div class="kpi-label">${label} 수량</div><div class="kpi-value">${formatInt(s.shares)}주</div></div>
+                            <div class="kpi"><div class="kpi-label">${label} 금액</div><div class="kpi-value">${formatKRW(s.amount)}</div></div>
+                            <div class="kpi wide"><div class="kpi-label">보고자</div><div class="kpi-value text">${esc(r.reporter)} · ${esc([r.position, r.registered, r.major_holder].filter(Boolean).join(' · ') || '-')}</div></div>
+                            <div class="kpi wide"><div class="kpi-label">지분율 (직전 → 보고 후)</div><div class="kpi-value">${formatPct(r.ownership_before)} → ${formatPct(r.ownership_after)}</div></div>
+                            ${plan}
+                        </div>
+                        <div class="trade-list">
+                            <table>
+                                <thead><tr><th>변동일</th><th>사유</th><th class="num">수량</th><th class="num">단가</th></tr></thead>
+                                <tbody>${tradeRows}</tbody>
+                            </table>
+                        </div>
+                        <div class="detail-note">변동일과 단가는 공시에 적힌 값입니다. 장내 거래는 결제일 기준으로 보고되기도 합니다. 회색 행은 지금 집계에서 빠진 거래나 변동입니다.</div>
+                    </div>
+                </div>`;
+            renderPriceChart();
+        }
+
+        async function getPrices(code, period) {
+            const key = `${code}:${period}`;
+            if (!priceCache.has(key)) {
+                priceCache.set(key, getJSON(`/api/prices/${encodeURIComponent(code)}?period=${period}`).catch((err) => {
+                    priceCache.delete(key);
+                    throw err;
+                }));
+            }
+            return priceCache.get(key);
+        }
+
+        function aggregate(rows, tf) {
+            if (tf === 'day') return rows;
+            const groups = new Map();
+            for (const row of rows) {
+                const d = new Date(row.date + 'T00:00:00Z');
+                if (tf === 'week') d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+                else d.setUTCDate(1);
+                const key = d.toISOString().slice(0, 10);
+                const g = groups.get(key);
+                if (!g) groups.set(key, { ...row, date: key });
+                else {
+                    g.high = Math.max(g.high, row.high);
+                    g.low = Math.min(g.low, row.low);
+                    g.close = row.close;
+                    g.volume += row.volume;
+                }
+            }
+            return [...groups.values()];
+        }
+
+        function movingAverage(rows, period) {
+            const out = [];
+            let sum = 0;
+            rows.forEach((row, i) => {
+                sum += row.close;
+                if (i >= period) sum -= rows[i - period].close;
+                if (i >= period - 1) out.push({ time: row.date, value: sum / period });
+            });
+            return out;
+        }
+
+        function barTimeFor(bars, date) {
+            // last bar that starts on or before the date
+            let lo = 0, hi = bars.length - 1, found = null;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (bars[mid].date <= date) { found = bars[mid].date; lo = mid + 1; } else hi = mid - 1;
+            }
+            return found;
+        }
+
+        async function renderPriceChart() {
+            const r = selectedRecord();
+            const box = $('priceChart');
+            const token = ++chartToken;
+            if (!r || !box) return;
+            if (state.chart) { state.chart.remove(); state.chart = null; }
+            if (!window.LightweightCharts) {
+                box.innerHTML = '<div class="chart-message">차트 라이브러리를 불러오지 못했습니다.</div>';
+                return;
+            }
+            if (!r.stock_code) {
+                box.innerHTML = '<div class="chart-message">비상장 종목이라 주가 차트가 없습니다.</div>';
+                return;
+            }
+            const o = { ...state.chartOptions };
+            let data;
+            try {
+                data = await getPrices(r.stock_code, o.period);
+            } catch (err) {
+                if (token === chartToken && $('priceChart')) $('priceChart').innerHTML = `<div class="chart-message">${esc(err.message)}</div>`;
+                return;
+            }
+            if (token !== chartToken || !$('priceChart')) return;
+            const raw = (data.prices || []).filter((p) => p.close > 0);
+            if (!raw.length) {
+                $('priceChart').innerHTML = '<div class="chart-message">주가 데이터가 없습니다.</div>';
+                return;
+            }
+            const last = raw[raw.length - 1];
+            $('lastClose').textContent = `${formatWon(last.close)} (${shortDate(last.date).slice(3)})`;
+
+            const ohlc = raw.filter((p) => p.open > 0 && p.high > 0 && p.low > 0).length >= raw.length * 0.9;
+            const bars = aggregate(ohlc ? raw.filter((p) => p.open > 0) : raw, o.tf);
+            const c = themeColors();
+            const el = $('priceChart');
+            el.innerHTML = '';
+            const chart = LightweightCharts.createChart(el, {
+                autoSize: true,
+                layout: { background: { type: 'solid', color: 'transparent' }, textColor: c.text, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 },
+                grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+                rightPriceScale: { borderColor: c.grid, scaleMargins: { top: 0.08, bottom: 0.2 } },
+                timeScale: { borderColor: c.grid, rightOffset: 3, fixLeftEdge: true },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                localization: { locale: 'ko-KR', dateFormat: 'yyyy.MM.dd', priceFormatter: (p) => Math.round(p).toLocaleString('ko-KR') },
+            });
+            state.chart = chart;
+
+            const priceFormat = { type: 'price', precision: 0, minMove: 1 };
+            const main = ohlc
+                ? chart.addCandlestickSeries({ upColor: '#ef4444', downColor: '#3b82f6', borderVisible: false, wickUpColor: '#ef4444', wickDownColor: '#3b82f6', priceFormat })
+                : chart.addLineSeries({ color: c.side, lineWidth: 2, priceFormat });
+            main.setData(bars.map((b) => (ohlc ? { time: b.date, open: b.open, high: b.high, low: b.low, close: b.close } : { time: b.date, value: b.close })));
+
+            for (const ind of INDICATORS) {
+                if (!o[ind.key] || bars.length < ind.period) continue;
+                const line = chart.addLineSeries({ color: ind.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+                line.setData(movingAverage(bars, ind.period));
+            }
+            if (o.vol) {
+                const vol = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
+                chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+                vol.setData(bars.map((b) => ({ time: b.date, value: b.volume, color: b.close >= b.open ? 'rgba(239,68,68,0.35)' : 'rgba(59,130,246,0.35)' })));
+            }
+
+            // Markers: this filing's trades plus other reporters' trades in the same stock.
+            const own = state.side === 'buy' ? '#21d3a7' : '#f5a524';
+            const markers = new Map();
+            for (const rec of state.records) {
+                if (rec.stock_code !== r.stock_code) continue;
+                for (const t of rec.trades) {
+                    if (!counts(t) || t.security !== '보통주' || !t.date) continue;
+                    const time = barTimeFor(bars, t.date);
+                    if (!time) continue;
+                    const mine = rec.rcept_no === r.rcept_no;
+                    const prev = markers.get(time);
+                    if (!prev || (mine && !prev.mine)) markers.set(time, { mine });
+                }
+            }
+            main.setMarkers([...markers.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([time, m]) => ({
+                time,
+                position: state.side === 'buy' ? 'belowBar' : 'aboveBar',
+                shape: m.mine ? (state.side === 'buy' ? 'arrowUp' : 'arrowDown') : 'circle',
+                color: m.mine ? own : '#4ea3ff',
+                size: m.mine ? 1.2 : 0.8,
+            })));
+
+            const s = sideOf(r);
+            if (s.common_avg) {
+                main.createPriceLine({ price: s.common_avg, color: own, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: `평균 ${state.side === 'buy' ? '매수' : '매도'}가` });
+            }
+            chart.timeScale().fitContent();
         }
 
         // ---------- misc ----------
@@ -1182,21 +1478,25 @@
                     el.textContent = el.dataset.sideText.split('|')[state.side === 'buy' ? 0 : 1];
                 });
                 state.page = 1;
+                closeDetail();
                 render();
             });
             ['includeHolders', 'includeOffMarket'].forEach((id) => $(id).addEventListener('change', (e) => {
                 state[id] = e.target.checked;
                 state.page = 1;
+                closeDetail();
                 render();
             }));
             $('searchInput').addEventListener('input', (e) => {
                 state.query = e.target.value;
                 state.page = 1;
+                closeDetail();
                 render();
             });
             $('pageSize').addEventListener('change', (e) => {
                 state.pageSize = Number(e.target.value);
                 state.page = 1;
+                closeDetail();
                 renderTable();
             });
             document.querySelector('#dataTable thead').addEventListener('click', (e) => {
@@ -1205,13 +1505,37 @@
                 const key = th.dataset.sort;
                 state.sort = { key, asc: state.sort.key === key ? !state.sort.asc : ['corp_name', 'reporter', 'position'].includes(key) };
                 state.page = 1;
+                closeDetail();
                 render();
             });
             $('pagination').addEventListener('click', (e) => {
                 const btn = e.target.closest('button[data-page]');
                 if (!btn || btn.disabled) return;
                 state.page = Number(btn.dataset.page);
+                closeDetail();
                 renderTable();
+            });
+            $('tableBody').addEventListener('click', (e) => {
+                if (e.target.closest('a')) return;
+                const tool = e.target.closest('.tool-btn');
+                if (tool) {
+                    const o = state.chartOptions;
+                    if (tool.dataset.period) o.period = tool.dataset.period;
+                    if (tool.dataset.tf) o.tf = tool.dataset.tf;
+                    if (tool.dataset.ind) o[tool.dataset.ind] = !o[tool.dataset.ind];
+                    renderDetail();
+                    return;
+                }
+                if (e.target.closest('.detail-row')) return;
+                const row = e.target.closest('tr.data-row');
+                if (row) toggleDetail(row.dataset.rcept);
+            });
+            $('tableBody').addEventListener('keydown', (e) => {
+                const row = e.target.closest('tr.data-row');
+                if (row && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    toggleDetail(row.dataset.rcept);
+                }
             });
         }
 

@@ -29,20 +29,26 @@ def api(monkeypatch):
 
     def handler(request):
         calls.append(request.url.path)
-        assert request.url.params["crtfc_key"] == "test-key"
+        if "siseJson" not in request.url.path:
+            assert request.url.params["crtfc_key"] == "test-key"
         if request.url.path.endswith("/list.json"):
             return httpx.Response(200, json=state["list"])
         if request.url.path.endswith("/document.xml"):
             if state["doc_status"]:
                 return httpx.Response(200, json={"status": state["doc_status"], "message": "error"})
             return httpx.Response(200, content=zip_document(DOCS[request.url.params["rcept_no"]]))
+        if "siseJson" in request.url.path:
+            return httpx.Response(200, text="""[['날짜', '시가', '고가', '저가', '종가', '거래량', '외국인소진율'],
+["20261020", 10000, 10500, 9900, 10200, 12345, 1.5],
+["20261021", 10200, 10300, 10000, 10100, 23456, 1.5]]""")
         return httpx.Response(404)
 
     monkeypatch.setattr(server, "DART_API_KEY", "test-key")
     monkeypatch.setattr(server, "new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     monkeypatch.setattr(server, "dart_throttle", server.Throttle(10_000))
+    monkeypatch.setattr(server, "naver_throttle", server.Throttle(10_000))
     monkeypatch.setattr(server, "dart_budget", server.DailyBudget(1_000))
-    for name in ("documents", "listings", "days"):
+    for name in ("documents", "listings", "days", "prices"):
         monkeypatch.setattr(server, name, server.TTLCache(100))
     monkeypatch.setattr(server, "today_kst", lambda: date(2026, 10, 22))
     return TestClient(server.app), calls, state
@@ -130,6 +136,19 @@ def test_rejects_bad_dates(api, value):
     client, calls, _ = api
     assert client.get(f"/api/filings/{value}").status_code in (400, 404)
     assert calls == []
+
+
+def test_prices(api):
+    client, _, _ = api
+    res = client.get("/api/prices/000001?period=3m")
+    assert res.status_code == 200
+    prices = res.json()["prices"]
+    assert prices[0] == {"date": "2026-10-20", "open": 10000.0, "high": 10500.0, "low": 9900.0,
+                         "close": 10200.0, "volume": 12345}
+    assert client.get("/api/prices/00000A?period=3m").status_code == 200
+    assert client.get("/api/prices/../etc?period=3m").status_code == 404
+    assert client.get("/api/prices/1234567?period=3m").status_code == 400
+    assert client.get("/api/prices/000001?period=10y").status_code == 400
 
 
 def test_index_has_security_headers(api):

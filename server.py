@@ -38,6 +38,7 @@ KST = timezone(timedelta(hours=9))
 
 DART_API_KEY = os.getenv("DART_API_KEY", "").strip()
 DART_BASE_URL = os.getenv("DART_BASE_URL", "https://opendart.fss.or.kr/api").strip().rstrip("/")
+NAVER_CHART_URL = "https://api.finance.naver.com/siseJson.naver"
 
 # OpenDART blocks clients that send bursts of requests, so each instance
 # spaces its calls out and stops before the per-key daily quota (20,000).
@@ -47,6 +48,7 @@ DOC_CONCURRENCY = 4
 DAY_TIME_BUDGET = 12.0  # seconds per request; the client asks again for the rest
 MAX_LOOKBACK_DAYS = 366
 LOADS_PER_CLIENT = 90  # uncached days one client may trigger per 10 minutes
+PRICE_PERIODS = {"3m": 92, "6m": 183, "1y": 366, "2y": 731}
 
 DART_ERRORS = {
     "010": (503, "등록되지 않은 OpenDART API 키입니다."),
@@ -143,12 +145,14 @@ class DailyBudget:
 
 
 dart_throttle = Throttle(DART_REQUESTS_PER_SECOND)
+naver_throttle = Throttle(4)
 dart_budget = DailyBudget(DART_DAILY_BUDGET)
 client_limiter = ClientLimiter(LOADS_PER_CLIENT, 600)
 
 documents = TTLCache(3000)  # rcept_no -> parsed filing; filings never change
 listings = TTLCache(400)  # day -> list.json rows
 days = TTLCache(400)  # day -> finished response body
+prices = TTLCache(300)  # (code, period) -> price rows
 
 _inflight = weakref.WeakKeyDictionary()  # event loop -> {day: task}
 
@@ -404,6 +408,50 @@ async def get_filings(value: str, request: Request):
         ttl = day_ttl(day)
         cache = f"public, max-age={min(ttl, 600) // 2}, s-maxage={max(ttl, 300)}, stale-while-revalidate={ttl * 4}"
     return JSONResponse(body, headers={"Cache-Control": cache})
+
+
+_NAVER_ROW = re.compile(r'\[\s*"(\d{8})"\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)')
+
+
+def parse_naver_rows(text):
+    rows = []
+    for ymd, o, h, l, c, v in _NAVER_ROW.findall(text):
+        rows.append({
+            "date": f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}",
+            "open": float(o), "high": float(h), "low": float(l), "close": float(c), "volume": int(float(v)),
+        })
+    return rows
+
+
+@app.get("/api/prices/{stock_code}")
+async def get_prices(stock_code: str, period: str = "1y"):
+    if not re.fullmatch(r"[0-9A-Z]{6}", stock_code):
+        raise HTTPException(400, "종목코드가 올바르지 않습니다.")
+    if period not in PRICE_PERIODS:
+        raise HTTPException(400, "지원하지 않는 기간입니다.")
+
+    rows = prices.get((stock_code, period))
+    if rows is None:
+        end = today_kst()
+        start = end - timedelta(days=PRICE_PERIODS[period])
+        await naver_throttle.wait()
+        try:
+            async with new_client() as client:
+                resp = await client.get(NAVER_CHART_URL, params={
+                    "symbol": stock_code, "requestType": 1, "timeframe": "day",
+                    "startTime": start.strftime("%Y%m%d"), "endTime": end.strftime("%Y%m%d"),
+                })
+        except httpx.TransportError as exc:
+            raise UpstreamError("주가 데이터를 가져오지 못했습니다.", 502) from exc
+        if resp.status_code != 200 or len(resp.content) > 2_000_000:
+            raise UpstreamError("주가 데이터를 가져오지 못했습니다.", 502)
+        rows = parse_naver_rows(resp.text)
+        prices.put((stock_code, period), rows, ttl=1800)
+
+    return JSONResponse(
+        {"stock_code": stock_code, "period": period, "prices": rows},
+        headers={"Cache-Control": "public, max-age=600, s-maxage=1800, stale-while-revalidate=3600"},
+    )
 
 
 if __name__ == "__main__":
