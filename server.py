@@ -65,13 +65,13 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Configuration
-API_KEY = os.getenv("DART_API_KEY", "REDACTED")
-BASE_URL = os.getenv("DART_BASE_URL", "http://proxy.invalid:5959/api")
+API_KEY = os.getenv("DART_API_KEY", "")
+BASE_URL = os.getenv("DART_BASE_URL", "https://opendart.fss.or.kr/api")
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://zlhybabcuyigewbevqcp.supabase.co")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-CRON_SECRET = os.getenv("CRON_SECRET", "change-me")
+CRON_SECRET = os.getenv("CRON_SECRET", "")
 
 # Lazy-loaded Supabase client
 _supabase_client = None
@@ -606,7 +606,7 @@ async def cron_update(
         # Also check Authorization header (Vercel sends this)
         return {"success": False, "message": "Unauthorized"}
 
-    if secret != CRON_SECRET:
+    if not CRON_SECRET or secret != CRON_SECRET:
         raise HTTPException(status_code=401, detail="Invalid cron secret")
 
     # Determine target date
